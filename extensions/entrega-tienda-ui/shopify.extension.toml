@@ -1,0 +1,19 @@
+api_version = "2025-07"
+uid = "6216d55a-a4f6-1fd7-ca38-f6c58f304898684b144d"
+
+[[extensions]]
+name = "Entrega en tienda — UI"
+handle = "entrega-tienda-ui"
+type = "ui_extension"
+
+  [[extensions.targeting]]
+  target = "purchase.checkout.shipping-option-list.render-after"
+  module = "./src/PickupNotice.tsx"
+
+  [extensions.capabilities]
+  network_access = false
+  block_progress = false
+
+  [[extensions.metafields]]
+  namespace = "custom"
+  key = "entrega_tienda_config"

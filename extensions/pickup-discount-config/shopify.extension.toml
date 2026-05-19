@@ -1,0 +1,19 @@
+api_version = "2026-04"
+uid = "43476f34-b42c-e07f-9edf-fb8b9775c01b43466c1e"
+
+[[extensions]]
+name = "Entrega en tienda — Configuración del descuento"
+handle = "pickup-discount-config"
+type = "ui_extension"
+description = "Permite editar el precio y el umbral de envío gratis directamente en el descuento"
+
+  [[extensions.targeting]]
+  target = "admin.discount-details.function-settings.render"
+  module = "./src/index.tsx"
+
+  [[extensions.metafields]]
+  namespace = "$app"
+  key = "function-configuration"
+
+  [extensions.capabilities]
+  network_access = false

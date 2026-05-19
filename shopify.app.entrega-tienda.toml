@@ -1,0 +1,37 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "950341bc65c3b78f044de04fa6d1824e"
+name = "entrega-tienda"
+application_url = "https://entrega-tienda.onrender.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+include_config_on_deploy = true
+
+[webhooks]
+api_version = "2026-07"
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/uninstalled"
+  topics = ["app/uninstalled"]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/scopes_update"
+  topics = ["app/scopes_update"]
+
+[access_scopes]
+scopes = "read_locations,read_orders,read_shipping,write_orders,read_delivery_customizations,write_delivery_customizations,write_discounts"
+
+[auth]
+redirect_urls = [
+  "https://entrega-tienda.onrender.com/auth/callback",
+  "https://entrega-tienda.onrender.com/auth/shopify/callback",
+  "https://entrega-tienda.onrender.com/api/auth/callback"
+]
+
+[discount.metafields.app.function-configuration]
+type = "json"
+name = "Function configuration"
+access.admin = "merchant_read_write"
+access.storefront = "none"

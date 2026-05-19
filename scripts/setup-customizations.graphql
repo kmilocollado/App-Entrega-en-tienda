@@ -1,0 +1,251 @@
+# =============================================================================
+# Setup de customizations vía GraphiQL del Shopify CLI.
+#
+# Cómo usar:
+#   1) En el terminal donde corres `npx shopify app dev`, pulsa la tecla `g`.
+#      Eso abre GraphiQL en el browser conectado a tu dev store con auth.
+#   2) En el selector arriba, asegúrate de tener seleccionado "Admin API".
+#   3) Ejecuta primero la QUERY 1 para obtener los IDs de tus 2 functions.
+#   4) Copia los IDs en la MUTATION 1 y MUTATION 2 donde dice <FUNCTION_ID>.
+#   5) Ejecuta cada mutation. Verifica que userErrors vuelve vacío.
+#
+# Si el `discountAutomaticAppCreate` te da error con startsAt, ajusta la fecha
+# a una fecha futura cualquiera (formato ISO 8601 UTC).
+# =============================================================================
+
+
+# -------------------------------------------------------------------
+# QUERY 1 — Listar las functions de tu app y obtener sus IDs
+# -------------------------------------------------------------------
+{
+  shopifyFunctions(first: 25) {
+    nodes {
+      id
+      title
+      apiType
+      app { title }
+    }
+  }
+}
+
+
+# -------------------------------------------------------------------
+# MUTATION 1 — Crear la Delivery Customization (filtra Madrid)
+# Reemplaza <FUNCTION_ID_DELIVERY> con el id que te devolvió la QUERY 1
+# para "Entrega en tienda — Delivery Customization".
+# -------------------------------------------------------------------
+mutation CreateDeliveryCustomization {
+  deliveryCustomizationCreate(
+    deliveryCustomization: {
+      title: "Entrega en tienda — Delivery Customization"
+      functionId: "<FUNCTION_ID_DELIVERY>"
+      enabled: true
+    }
+  ) {
+    deliveryCustomization {
+      id
+      title
+      enabled
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+
+
+# -------------------------------------------------------------------
+# MUTATION 2 — Crear el descuento automático de shipping (app function)
+# Reemplaza <FUNCTION_ID_DISCOUNT> con el id que te devolvió la QUERY 1
+# para "Entrega en tienda — Shipping Discount".
+# -------------------------------------------------------------------
+mutation CreateShippingDiscount {
+  discountAutomaticAppCreate(
+    automaticAppDiscount: {
+      title: "Entrega en tienda — Shipping Discount"
+      functionId: "<FUNCTION_ID_DISCOUNT>"
+      startsAt: "2026-05-06T00:00:00Z"
+    }
+  ) {
+    automaticAppDiscount {
+      discountId
+      title
+      status
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+
+
+# -------------------------------------------------------------------
+# VERIFICACIÓN — Lista las customizations existentes
+# -------------------------------------------------------------------
+{
+  deliveryCustomizations(first: 10) {
+    nodes {
+      id
+      title
+      enabled
+      functionId
+    }
+  }
+}
+
+
+# -------------------------------------------------------------------
+# METAFIELD — Solo en la TIENDA (Shop). Nunca uses DeliveryCustomization u otro owner.
+#
+# ┌─ ¿Por qué `metafieldsSet` en GraphiQL SÍ cambia el valor pero el Admin “no”?
+# │  Sin DEFINICIÓN del metacampo en el dueño SHOP, Shopify trata el dato como
+# │  valor suelto: puede existir en API pero el editor de “Datos personalizados”
+# │  no enlaza bien o no guarda como esperas. Crea la definición UNA VEZ
+# │  (mutación siguiente, o Admin → Datos personalizados → Tienda → Añadir definición).
+# └─ Tras eso, editar el JSON en Admin es editar el MISMO metacampo que lee el checkout.
+#
+# La app en checkout ya LEE este valor con useAppMetafields (shop extension metafield).
+# Para el valor inicial también puedes usar `metafieldsSet` más abajo.
+#
+# Flujo recomendado:
+#   1) CreateShopEntregaTiendaConfigDefinition (si userErrors vacío o “ya existe”).
+#   2) SetShopConfigMetafield con tu JSON base (opcional si ya pegaste valor en Admin).
+#   3) Día a día: Admin → Configuración → Datos personalizados → TIENDA → este campo
+#      (fija el metacampo si quieres verlo también en Configuración → General).
+#
+# ⚠️ ownerId en metafieldsSet = GID del SHOP, p. ej. gid://shopify/Shop/62123456789
+#    Query: { shop { id } }
+#
+# Si pones gid://shopify/DeliveryCustomization/... guardas el JSON en ese recurso.
+# La app lee shop.metafield(namespace: custom, key: entrega_tienda_config) → no verás
+# storeAddress en GraphiQL ni en checkout aunque la mutación no falle.
+#
+# Ejemplo completo del JSON: docs/METAFIELD_EXAMPLE.json
+# -------------------------------------------------------------------
+mutation CreateShopEntregaTiendaConfigDefinition {
+  metafieldDefinitionCreate(
+    definition: {
+      name: "Entrega en tienda — configuración"
+      namespace: "custom"
+      key: "entrega_tienda_config"
+      description: "JSON: storeAddress, displayName, cities, pricing. Ejemplo en docs/METAFIELD_EXAMPLE.json"
+      type: "json"
+      ownerType: SHOP
+    }
+  ) {
+    createdDefinition {
+      id
+      namespace
+      key
+      type {
+        name
+      }
+    }
+    userErrors {
+      field
+      message
+      code
+    }
+  }
+}
+
+
+# -------------------------------------------------------------------
+# METAFIELD — Valor en la tienda (misma clave que arriba)
+# -------------------------------------------------------------------
+# ownerId: GID del Shop, p. ej. { shop { id } } → gid://shopify/Shop/100172300576
+mutation SetShopConfigMetafield {
+  metafieldsSet(
+    metafields: [
+      {
+        ownerId: "<SHOP_ID>"
+        namespace: "custom"
+        key: "entrega_tienda_config"
+        type: "json"
+        value: "{\"enabled\":true,\"matchMode\":\"any\",\"countryCode\":\"ES\",\"cities\":[\"Madrid\"],\"provinces\":[\"M\"],\"zipRanges\":[{\"from\":\"28000\",\"to\":\"28099\"}],\"displayName\":\"Entrega en tienda\",\"pickupDeliveryOptionMatchers\":[\"entrega en tienda\"],\"pricing\":{\"default\":4.99,\"rules\":[{\"type\":\"subtotalAbove\",\"value\":100,\"price\":0}]},\"storeAddress\":{\"first_name\":\"Tienda\",\"last_name\":\"Recogida\",\"address1\":\"Plaza del Emperador Carlos V\",\"address2\":\"\",\"city\":\"Madrid\",\"province\":\"Madrid\",\"province_code\":\"M\",\"zip\":\"28045\",\"country\":\"Spain\",\"country_code\":\"ES\",\"phone\":\"+34900000000\"}}"
+      }
+    ]
+  ) {
+    metafields {
+      id
+      namespace
+      key
+      type
+      value
+    }
+    userErrors {
+      field
+      message
+      code
+    }
+  }
+}
+
+
+# -------------------------------------------------------------------
+# DIAGNÓSTICO — Si `shop { metafield(...) }` es null pero en Admin "ves" el JSON:
+#
+# 1) A menudo existe la DEFINICIÓN pero no hay VALOR guardado en el recurso Shop
+#    (editor sin Guardar, o guardaste solo la definición).
+# 2) Namespace/key distintos (p. ej. typo). Usa las queries de abajo y copia
+#    exactamente namespace + key que devuelve la API.
+# 3) Tras editar en Admin: Configuración → General, baja a Metacampos y pulsa
+#    Guardar en la página (no solo cerrar el panel).
+#
+# Ejecuta en GraphiQL **una query por vez** (copia solo el bloque entre { y } que necesites).
+#
+# -------------------------------------------------------------------
+# DIAGNÓSTICO A — Lista de VALORES de metacampos en la tienda (sin filtrar)
+# Si NO aparece ninguna fila con key `entrega_tienda_config`, la API no tiene valor:
+# el JSON que ves en Admin no llegó a guardarse en el Shop.
+# -------------------------------------------------------------------
+{
+  shop {
+    id
+    myshopifyDomain
+    metafields(first: 50) {
+      nodes {
+        namespace
+        key
+        type
+        updatedAt
+      }
+    }
+  }
+}
+
+
+# -------------------------------------------------------------------
+# DIAGNÓSTICO B — Definiciones del dueño SHOP (nombre en Admin vs namespace/key reales)
+# -------------------------------------------------------------------
+{
+  metafieldDefinitions(first: 50, ownerType: SHOP) {
+    nodes {
+      name
+      namespace
+      key
+      type {
+        name
+      }
+    }
+  }
+}
+
+
+# -------------------------------------------------------------------
+# VERIFICAR el metacampo concreto (solo si namespace/key coinciden)
+# -------------------------------------------------------------------
+{
+  shop {
+    metafield(namespace: "custom", key: "entrega_tienda_config") {
+      id
+      namespace
+      key
+      jsonValue
+      value
+      updatedAt
+    }
+  }
+}

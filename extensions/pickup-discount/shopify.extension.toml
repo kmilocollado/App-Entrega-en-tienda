@@ -1,0 +1,20 @@
+api_version = "2026-04"
+uid = "6f0c9a68-0939-1708-1f0e-d255066aa7704acbfbda"
+
+[[extensions]]
+name = "Entrega en tienda — Shipping Discount"
+handle = "pickup-discount"
+type = "function"
+description = "Aplica descuento dinámico al método Entrega en tienda según subtotal"
+
+  [[extensions.targeting]]
+  target = "purchase.shipping-discount.run"
+  input_query = "src/run.graphql"
+  export = "run"
+
+  [extensions.build]
+  command = ""
+  path = "dist/function.wasm"
+
+  [extensions.ui]
+  handle = "pickup-discount-config"

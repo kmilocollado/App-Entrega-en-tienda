@@ -1,0 +1,9 @@
+{
+  "pickup": {
+    "title": "Store pickup",
+    "intro": "Pick up your order at:",
+    "subtext": "Your shipping address will switch to the store address. Billing address is not changed by this extension: use checkout’s “same as shipping” or an orderUpdate Flow. We will notify you by email and SMS when ready. Hours: M-F 10:00–20:00, Sat 10:00–14:00.",
+    "addressNotConfigured": "Store address is not configured in the metafield.",
+    "cannotPatchShippingAddress": "In this checkout mode Shopify may block editing the shipping address (e.g. Apple/Google Pay or a checkout that locks the address). Try the normal web checkout (email + manual address)."
+  }
+}

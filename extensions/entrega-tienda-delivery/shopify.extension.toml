@@ -1,0 +1,21 @@
+api_version = "2026-04"
+uid = "2d0f7608-acc0-3c50-2321-bedfa7a34f3ca05b3668"
+
+[[extensions]]
+name = "Entrega en tienda — Delivery Customization"
+handle = "entrega-tienda-delivery"
+type = "function"
+description = "Filtra y renombra el método de pickup según ciudad/zip configurable"
+
+  [[extensions.targeting]]
+  target = "cart.delivery-options.transform.run"
+  input_query = "src/cart_delivery_options_transform_run.graphql"
+  export = "cart-delivery-options-transform-run"
+
+  [extensions.build]
+  command = ""
+  path = "dist/function.wasm"
+
+  [extensions.ui.paths]
+  create = "/app/delivery-customization/:functionId/new"
+  details = "/app/delivery-customization/:functionId/:id"

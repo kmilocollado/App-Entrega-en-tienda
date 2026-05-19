@@ -1,0 +1,9 @@
+name = "entrega-tienda-web"
+roles = ["frontend", "backend"]
+webhooks_path = "/webhooks/app/uninstalled"
+
+[commands]
+predev = "npm exec prisma generate"
+dev = "npm exec prisma migrate deploy && npm exec react-router dev"
+build = "npm exec react-router build"
+start = "npm exec react-router-serve ./build/server/index.js"

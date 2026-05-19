@@ -1,0 +1,31 @@
+query CartDeliveryOptionsTransformRunInput {
+  cart {
+    billingAddress {
+      city
+      provinceCode
+      zip
+      countryCode
+    }
+    deliveryGroups {
+      deliveryAddress {
+        city
+        provinceCode
+        zip
+        countryCode
+      }
+      deliveryOptions {
+        handle
+        title
+        deliveryMethodType
+        cost {
+          amount
+        }
+      }
+    }
+  }
+  shop {
+    metafield(namespace: "custom", key: "entrega_tienda_config") {
+      jsonValue
+    }
+  }
+}

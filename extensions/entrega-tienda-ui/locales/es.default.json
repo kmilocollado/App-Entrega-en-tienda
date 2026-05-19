@@ -1,0 +1,9 @@
+{
+  "pickup": {
+    "title": "Recogida en tienda",
+    "intro": "Recogerás tu pedido en:",
+    "subtext": "La dirección de envío pasará a la de la tienda. La facturación no la modifica esta extensión: en el checkout puedes usar “misma que envío” o un Flow con orderUpdate. Te avisaremos por email y SMS cuando esté listo. Horario: L-V 10:00–20:00, S 10:00–14:00.",
+    "addressNotConfigured": "La dirección de la tienda no está configurada en el metafield.",
+    "cannotPatchShippingAddress": "En este modo de checkout Shopify puede bloquear el cambio de dirección de envío (p. ej. Apple/Google Pay o tienda sin edición de dirección). Prueba el checkout web habitual o el correo + dirección manual."
+  }
+}

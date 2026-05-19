@@ -1,0 +1,29 @@
+{
+  "enabled": true,
+  "matchMode": "any",
+  "countryCode": "ES",
+  "cities": ["Madrid"],
+  "provinces": ["M"],
+  "zipRanges": [
+    { "from": "28000", "to": "28099" }
+  ],
+  "displayName": "Entrega en tienda",
+  "pickupDeliveryOptionMatchers": ["entrega en tienda"],
+  "pricing": {
+    "default": 4.99,
+    "rules": [{ "type": "subtotalAbove", "value": 100, "price": 0 }]
+  },
+  "storeAddress": {
+    "first_name": "Tienda",
+    "last_name": "Recogida",
+    "address1": "Plaza del Emperador Carlos V",
+    "address2": "",
+    "city": "Madrid",
+    "province": "Madrid",
+    "province_code": "M",
+    "zip": "28045",
+    "country": "Spain",
+    "country_code": "ES",
+    "phone": "+34900000000"
+  }
+}
