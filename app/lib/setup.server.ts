@@ -1,8 +1,6 @@
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
-import type { SetupStatus } from "./setup.shared";
+import type { SetupStatus, SetupStepResult } from "./setup.shared";
 
-const DELIVERY_FUNCTION_HANDLE = "entrega-tienda-delivery";
-const DISCOUNT_FUNCTION_HANDLE = "pickup-discount";
 const DELIVERY_CUSTOMIZATION_TITLE = "Entrega en tienda — Delivery Customization";
 const SHIPPING_DISCOUNT_TITLE = "Entrega en tienda — Shipping Discount";
 const SHOP_METAFIELD_NAMESPACE = "custom";
@@ -58,6 +56,31 @@ async function graphql<T>(
   return (await response.json()) as GraphqlResponse<T>;
 }
 
+/** En producción `functionHandle` suele fallar; el ID se obtiene vía token de la app. */
+async function resolveFunctionId(
+  admin: AdminApiContext,
+  titleIncludes: string,
+): Promise<string | null> {
+  const result = await graphql<{
+    shopifyFunctions: {
+      nodes: Array<{ id: string; title: string }>;
+    };
+  }>(
+    admin,
+    `#graphql
+      query ListShopifyFunctions {
+        shopifyFunctions(first: 25) {
+          nodes { id title }
+        }
+      }`,
+  );
+
+  const node = result.data?.shopifyFunctions.nodes.find((n) =>
+    n.title.includes(titleIncludes),
+  );
+  return node?.id ?? null;
+}
+
 async function ensureDeliveryCustomization(
   admin: AdminApiContext,
 ): Promise<SetupStepResult> {
@@ -85,6 +108,52 @@ async function ensureDeliveryCustomization(
     };
   }
 
+  if (existing && !existing.enabled) {
+    const updated = await graphql<{
+      deliveryCustomizationUpdate: {
+        deliveryCustomization: { id: string; enabled: boolean } | null;
+        userErrors: Array<{ message: string }>;
+      };
+    }>(
+      admin,
+      `#graphql
+        mutation EnableDeliveryCustomization($id: ID!) {
+          deliveryCustomizationUpdate(
+            id: $id
+            deliveryCustomization: { enabled: true }
+          ) {
+            deliveryCustomization { id enabled }
+            userErrors { field message }
+          }
+        }`,
+      { id: existing.id },
+    );
+
+    const updatePayload = updated.data?.deliveryCustomizationUpdate;
+    const updateErr = userErrorsMessage(updatePayload?.userErrors);
+    if (updateErr) {
+      return { ok: false, message: updateErr };
+    }
+    if (updatePayload?.deliveryCustomization?.enabled) {
+      return {
+        ok: true,
+        message: "Personalización de entrega reactivada.",
+      };
+    }
+  }
+
+  const functionId = await resolveFunctionId(
+    admin,
+    "Delivery Customization",
+  );
+  if (!functionId) {
+    return {
+      ok: false,
+      message:
+        "Function de entrega no encontrada. Haz deploy + release de la app en Partners e instala de nuevo.",
+    };
+  }
+
   const created = await graphql<{
     deliveryCustomizationCreate: {
       deliveryCustomization: { id: string; title: string } | null;
@@ -102,7 +171,7 @@ async function ensureDeliveryCustomization(
     {
       input: {
         title: DELIVERY_CUSTOMIZATION_TITLE,
-        functionHandle: DELIVERY_FUNCTION_HANDLE,
+        functionId,
         enabled: true,
       },
     },
@@ -160,6 +229,15 @@ async function ensureShippingDiscount(
     };
   }
 
+  const functionId = await resolveFunctionId(admin, "Shipping Discount");
+  if (!functionId) {
+    return {
+      ok: false,
+      message:
+        "Function de descuento no encontrada. Haz deploy + release de la app en Partners e instala de nuevo.",
+    };
+  }
+
   const created = await graphql<{
     discountAutomaticAppCreate: {
       automaticAppDiscount: { discountId: string; title: string } | null;
@@ -177,7 +255,7 @@ async function ensureShippingDiscount(
     {
       input: {
         title: SHIPPING_DISCOUNT_TITLE,
-        functionHandle: DISCOUNT_FUNCTION_HANDLE,
+        functionId,
         startsAt: new Date().toISOString(),
       },
     },

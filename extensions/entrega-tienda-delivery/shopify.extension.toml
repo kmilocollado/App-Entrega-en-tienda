@@ -15,7 +15,3 @@ description = "Filtra y renombra el método de pickup según ciudad/zip configur
   [extensions.build]
   command = ""
   path = "dist/function.wasm"
-
-  [extensions.ui.paths]
-  create = "/app/delivery-customization/:functionId/new"
-  details = "/app/delivery-customization/:functionId/:id"

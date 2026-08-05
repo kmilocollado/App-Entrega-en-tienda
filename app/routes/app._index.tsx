@@ -74,8 +74,21 @@ export default function Index() {
         <s-banner tone={ready ? "success" : "warning"}>
           {ready
             ? "La app está lista. Solo falta revisar envíos y ajustar la configuración de ciudad/zona si hace falta."
-            : "Hay pasos pendientes. Pulsa «Repetir configuración» o reinstala la app si el problema continúa."}
+            : "Hay pasos pendientes. Usa el botón de abajo o reinstala la app si el problema continúa."}
         </s-banner>
+        <s-stack direction="block" gap="base">
+          <s-button
+            variant="primary"
+            onClick={() => fetcher.submit({}, { method: "POST" })}
+            {...(isLoading ? { loading: true } : {})}
+          >
+            {ready ? "Volver a ejecutar configuración" : "Ejecutar configuración ahora"}
+          </s-button>
+          <s-text color="subdued">
+            Al abrir esta página la configuración se ejecuta sola. Si algo falló,
+            pulsa el botón para repetirla.
+          </s-text>
+        </s-stack>
       </s-section>
 
       <s-section heading="Recursos creados automáticamente">

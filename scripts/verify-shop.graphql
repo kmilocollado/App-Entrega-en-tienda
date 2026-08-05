@@ -1,0 +1,6 @@
+{
+  shop {
+    name
+    myshopifyDomain
+  }
+}

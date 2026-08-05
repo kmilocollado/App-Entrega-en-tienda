@@ -1,0 +1,18 @@
+mutation CreateShippingDiscount {
+  discountAutomaticAppCreate(
+    automaticAppDiscount: {
+      title: "Entrega en tienda — Shipping Discount"
+      functionHandle: "pickup-discount"
+      startsAt: "2026-08-05T00:00:00Z"
+    }
+  ) {
+    automaticAppDiscount {
+      discountId
+      title
+      status
+    }
+    userErrors {
+      message
+    }
+  }
+}

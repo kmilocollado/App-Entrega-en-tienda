@@ -1,0 +1,18 @@
+mutation CreateDeliveryCustomization {
+  deliveryCustomizationCreate(
+    deliveryCustomization: {
+      title: "Entrega en tienda — Delivery Customization"
+      functionHandle: "entrega-tienda-delivery"
+      enabled: true
+    }
+  ) {
+    deliveryCustomization {
+      id
+      title
+      enabled
+    }
+    userErrors {
+      message
+    }
+  }
+}

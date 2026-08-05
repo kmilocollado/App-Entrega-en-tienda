@@ -5,9 +5,9 @@
   "description": "Custom app de Vidal Vidal — Entrega en tienda (delivery customization, shipping discount function, Checkout UI + configuración embebida)",
   "type": "module",
   "scripts": {
-    "dev": "npx shopify app dev",
-    "build": "npx shopify app build",
-    "deploy": "npx shopify app deploy",
+    "dev": "npx shopify app dev --config entrega-tienda",
+    "build": "npx shopify app build --config entrega-tienda",
+    "deploy": "npx shopify app deploy --config entrega-tienda --allow-updates",
     "deploy:fly": "fly deploy",
     "config:link": "npx shopify app config link",
     "config:use": "npx shopify app config use",
