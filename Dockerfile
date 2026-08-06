@@ -6,6 +6,7 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 COPY extensions ./extensions
+COPY prisma ./prisma
 
 RUN npm ci
 

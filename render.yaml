@@ -1,7 +1,7 @@
 # Render Blueprint — plan Free (sin tarjeta)
 # https://render.com/docs/blueprint-spec
 #
-# Monorepo: en Render, al crear el Blueprint, pon Root Directory = apps/entrega-tienda
+# Root Directory en Render: dejar vacío (raíz del repo). No uses apps/entrega-tienda.
 
 services:
   - type: web
