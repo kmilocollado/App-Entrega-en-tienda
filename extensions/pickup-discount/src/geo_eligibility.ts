@@ -62,7 +62,9 @@ export function addressMatchesPickupBranch(
 ): boolean {
   const zStore = branch.zip?.replace(/\D/g, "") ?? "";
   const zAddr = addr.zip?.replace(/\D/g, "") ?? "";
-  if (zStore.length >= 3 && zAddr.length >= 3 && zStore === zAddr) return true;
+  if (zStore.length >= 3 && zAddr.length >= 3) {
+    return zStore === zAddr;
+  }
   if (branch.city && addr.city) {
     return normalize(branch.city) === normalize(addr.city);
   }
@@ -117,33 +119,33 @@ export function resolveAddressForGeoRule<
     return resolveCustomerShippingAddress(allGroups, billing);
   }
 
-  return (
-    currentGroup.deliveryAddress ??
-    resolveCustomerShippingAddress(allGroups, billing)
-  );
+  const customerAddr = resolveCustomerShippingAddress(allGroups, billing);
+  if (customerAddr) return customerAddr;
+
+  return currentGroup.deliveryAddress ?? null;
 }
 
 export function inCountry(addr: Addr, cfg: GeoMatchConfig): boolean {
   if (!cfg.countryCode) return true;
   const want = normalize(String(cfg.countryCode));
   const have = addr.countryCode ? normalize(String(addr.countryCode)) : "";
-  return Boolean(have && have === want);
+  if (have && have === want) return true;
+  if (!have && want === "es") {
+    return Boolean(addr.city?.trim() || addr.zip?.trim() || addr.provinceCode?.trim());
+  }
+  return false;
 }
 
 export function isEligibleForGeo(addr: Addr, cfg: GeoMatchConfig): boolean {
   const checks: boolean[] = [];
 
-  if (cfg.cities?.length) {
-    if (!addr.city) {
-      checks.push(false);
-    } else {
-      const city = normalize(addr.city);
-      checks.push(cfg.cities.some((c) => normalize(c) === city));
-    }
+  if (cfg.cities?.length && addr.city?.trim()) {
+    const city = normalize(addr.city);
+    checks.push(cfg.cities.some((c) => normalize(c) === city));
   }
 
-  if (cfg.provinces?.length) {
-    const provinceCode = normalize(addr.provinceCode ?? "");
+  if (cfg.provinces?.length && addr.provinceCode?.trim()) {
+    const provinceCode = normalize(addr.provinceCode);
     checks.push(
       cfg.provinces.some((p) =>
         provinceCodesMatch(p, provinceCode, addr.countryCode),
@@ -151,15 +153,11 @@ export function isEligibleForGeo(addr: Addr, cfg: GeoMatchConfig): boolean {
     );
   }
 
-  if (cfg.zipRanges?.length) {
-    if (!addr.zip) {
-      checks.push(false);
-    } else {
-      const z = addr.zip.replace(/\D/g, "");
-      checks.push(
-        cfg.zipRanges.some((r) => zipInNumericRange(z, r.from, r.to)),
-      );
-    }
+  if (cfg.zipRanges?.length && addr.zip?.trim()) {
+    const z = addr.zip.replace(/\D/g, "");
+    checks.push(
+      cfg.zipRanges.some((r) => zipInNumericRange(z, r.from, r.to)),
+    );
   }
 
   if (checks.length === 0) return false;
@@ -178,7 +176,7 @@ function provinceCodesMatch(
   if (n === p) return true;
 
   const c = countryCode ? normalize(String(countryCode)) : "";
-  if (c !== "es") return false;
+  if (c && c !== "es") return false;
 
   const cfgMadrid = n === "md" || n === "m" || n === "madrid";
   const addrMadrid = p === "m" || p === "md" || p === "madrid";
