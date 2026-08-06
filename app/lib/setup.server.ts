@@ -209,49 +209,187 @@ async function ensureDeliveryCustomization(
   return { ok: false, message: "No se pudo crear la personalización de entrega." };
 }
 
-async function ensureShippingDiscount(
+type ExistingAppDiscount = {
+  id: string;
+  title: string;
+  status?: string;
+  functionId?: string;
+};
+
+function isShippingDiscountTitle(title: string | undefined): boolean {
+  if (!title) return false;
+  const normalized = title.trim().toLowerCase();
+  return (
+    title === SHIPPING_DISCOUNT_TITLE ||
+    (normalized.includes("entrega en tienda") &&
+      normalized.includes("shipping"))
+  );
+}
+
+function isDuplicateDiscountTitleError(message: string): boolean {
+  return /unique|already|taken|duplicate/i.test(message);
+}
+
+function parseExistingAppDiscount(
+  id: string,
+  discount: unknown,
+): ExistingAppDiscount | null {
+  if (!discount || typeof discount !== "object" || !("title" in discount)) {
+    return null;
+  }
+  const parsed = discount as {
+    title?: string;
+    status?: string;
+    appDiscountType?: { functionId?: string };
+  };
+  if (!parsed.title) return null;
+  return {
+    id,
+    title: parsed.title,
+    status: parsed.status,
+    functionId: parsed.appDiscountType?.functionId,
+  };
+}
+
+async function findExistingShippingDiscount(
   admin: AdminApiContext,
-): Promise<SetupStepResult> {
-  const list = await graphql<{
-    automaticDiscountNodes: {
+  functionId?: string | null,
+): Promise<ExistingAppDiscount | null> {
+  const searchQuery = `title:${SHIPPING_DISCOUNT_TITLE}`;
+
+  const byTitle = await graphql<{
+    discountNodes: {
       nodes: Array<{
         id: string;
-        automaticDiscount: { title?: string } | null;
+        discount: unknown;
       }>;
     };
   }>(
     admin,
     `#graphql
-      query ListAutomaticDiscounts {
-        automaticDiscountNodes(first: 25) {
+      query FindShippingDiscountByTitle($query: String!) {
+        discountNodes(first: 10, query: $query) {
           nodes {
             id
-            automaticDiscount {
-              ... on DiscountAutomaticApp { title status }
+            discount {
+              ... on DiscountAutomaticApp {
+                title
+                status
+                appDiscountType { functionId }
+              }
+            }
+          }
+        }
+      }`,
+    { query: searchQuery },
+  );
+
+  for (const node of byTitle.data?.discountNodes.nodes ?? []) {
+    const parsed = parseExistingAppDiscount(node.id, node.discount);
+    if (!parsed) continue;
+    if (isShippingDiscountTitle(parsed.title)) return parsed;
+    if (functionId && parsed.functionId === functionId) return parsed;
+  }
+
+  const list = await graphql<{
+    discountNodes: {
+      nodes: Array<{
+        id: string;
+        discount: unknown;
+      }>;
+    };
+  }>(
+    admin,
+    `#graphql
+      query ListAppAutomaticDiscounts {
+        discountNodes(first: 50, query: "type:app") {
+          nodes {
+            id
+            discount {
+              ... on DiscountAutomaticApp {
+                title
+                status
+                appDiscountType { functionId }
+              }
             }
           }
         }
       }`,
   );
 
-  const existing = list.data?.automaticDiscountNodes.nodes.find(
-    (node) =>
-      node.automaticDiscount &&
-      "title" in node.automaticDiscount &&
-      node.automaticDiscount.title === SHIPPING_DISCOUNT_TITLE,
+  for (const node of list.data?.discountNodes.nodes ?? []) {
+    const parsed = parseExistingAppDiscount(node.id, node.discount);
+    if (!parsed) continue;
+    if (isShippingDiscountTitle(parsed.title)) return parsed;
+    if (functionId && parsed.functionId === functionId) return parsed;
+  }
+
+  return null;
+}
+
+async function ensureShippingDiscountActive(
+  admin: AdminApiContext,
+  discountId: string,
+): Promise<SetupStepResult> {
+  const updated = await graphql<{
+    discountAutomaticAppUpdate: {
+      automaticAppDiscount: { title: string; status: string } | null;
+      userErrors: Array<{ message: string }>;
+    };
+  }>(
+    admin,
+    `#graphql
+      mutation ReactivateShippingDiscount($id: ID!, $input: DiscountAutomaticAppInput!) {
+        discountAutomaticAppUpdate(id: $id, automaticAppDiscount: $input) {
+          automaticAppDiscount { title status }
+          userErrors { field message }
+        }
+      }`,
+    {
+      id: discountId,
+      input: {
+        startsAt: new Date().toISOString(),
+        discountClasses: ["SHIPPING"],
+      },
+    },
   );
+
+  const payload = updated.data?.discountAutomaticAppUpdate;
+  const err = userErrorsMessage(payload?.userErrors);
+  if (err) {
+    return {
+      ok: true,
+      message: "Descuento de envío ya existía en la tienda.",
+    };
+  }
+
+  const status = payload?.automaticAppDiscount?.status;
+  if (status === "ACTIVE" || status === "SCHEDULED") {
+    return { ok: true, message: "Descuento de envío reactivado." };
+  }
+  return { ok: true, message: "Descuento de envío ya configurado." };
+}
+
+async function ensureShippingDiscount(
+  admin: AdminApiContext,
+): Promise<SetupStepResult> {
+  const functionId = await resolveFunctionId(
+    admin,
+    "Shipping Discount",
+    "shipping",
+  );
+
+  const existing = await findExistingShippingDiscount(admin, functionId);
   if (existing) {
+    if (existing.status === "EXPIRED") {
+      return ensureShippingDiscountActive(admin, existing.id);
+    }
     return {
       ok: true,
       message: "Descuento de envío ya configurado.",
     };
   }
 
-  const functionId = await resolveFunctionId(
-    admin,
-    "Shipping Discount",
-    "shipping",
-  );
   if (!functionId) {
     return {
       ok: false,
@@ -292,6 +430,16 @@ async function ensureShippingDiscount(
   const payload = created.data?.discountAutomaticAppCreate;
   const err = userErrorsMessage(payload?.userErrors);
   if (err) {
+    if (isDuplicateDiscountTitleError(err)) {
+      const duplicate = await findExistingShippingDiscount(admin, functionId);
+      if (duplicate?.status === "EXPIRED") {
+        return ensureShippingDiscountActive(admin, duplicate.id);
+      }
+      return {
+        ok: true,
+        message: "Descuento de envío ya existía en la tienda.",
+      };
+    }
     return { ok: false, message: err };
   }
   if (payload?.automaticAppDiscount) {
