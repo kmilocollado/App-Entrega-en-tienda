@@ -5,6 +5,12 @@ const DELIVERY_CUSTOMIZATION_TITLE = "Entrega en tienda — Delivery Customizati
 const SHIPPING_DISCOUNT_TITLE = "Entrega en tienda — Shipping Discount";
 const SHOP_METAFIELD_NAMESPACE = "custom";
 const SHOP_METAFIELD_KEY = "entrega_tienda_config";
+const DISCOUNT_FUNCTION_CONFIG_JSON = JSON.stringify({
+  enabled: true,
+  defaultPrice: 4.99,
+  freeShippingThresholdEnabled: true,
+  freeOverSubtotal: 100,
+});
 
 export const DEFAULT_ENTREGA_CONFIG = {
   enabled: true,
@@ -327,6 +333,38 @@ async function findExistingShippingDiscount(
   return null;
 }
 
+async function ensureShippingDiscountFunctionConfig(
+  admin: AdminApiContext,
+  discountId: string,
+): Promise<void> {
+  await graphql<{
+    discountAutomaticAppUpdate: {
+      userErrors: Array<{ message: string }>;
+    };
+  }>(
+    admin,
+    `#graphql
+      mutation ConfigureShippingDiscountFunction($id: ID!, $input: DiscountAutomaticAppInput!) {
+        discountAutomaticAppUpdate(id: $id, automaticAppDiscount: $input) {
+          userErrors { field message }
+        }
+      }`,
+    {
+      id: discountId,
+      input: {
+        metafields: [
+          {
+            namespace: "$app",
+            key: "function-configuration",
+            type: "json",
+            value: DISCOUNT_FUNCTION_CONFIG_JSON,
+          },
+        ],
+      },
+    },
+  );
+}
+
 async function ensureShippingDiscountActive(
   admin: AdminApiContext,
   discountId: string,
@@ -381,6 +419,7 @@ async function ensureShippingDiscount(
 
   const existing = await findExistingShippingDiscount(admin, functionId);
   if (existing) {
+    await ensureShippingDiscountFunctionConfig(admin, existing.id);
     if (existing.status === "EXPIRED") {
       return ensureShippingDiscountActive(admin, existing.id);
     }
@@ -418,6 +457,14 @@ async function ensureShippingDiscount(
         functionId,
         startsAt: new Date().toISOString(),
         discountClasses: ["SHIPPING"],
+        metafields: [
+          {
+            namespace: "$app",
+            key: "function-configuration",
+            type: "json",
+            value: DISCOUNT_FUNCTION_CONFIG_JSON,
+          },
+        ],
       },
     },
   );
@@ -434,6 +481,9 @@ async function ensureShippingDiscount(
       const duplicate = await findExistingShippingDiscount(admin, functionId);
       if (duplicate?.status === "EXPIRED") {
         return ensureShippingDiscountActive(admin, duplicate.id);
+      }
+      if (duplicate) {
+        await ensureShippingDiscountFunctionConfig(admin, duplicate.id);
       }
       return {
         ok: true,
@@ -471,6 +521,10 @@ async function ensureMetafieldDefinition(
             description: "Ciudades, códigos postales, dirección de tienda y precios."
             type: "json"
             ownerType: SHOP
+            access: {
+              admin: MERCHANT_READ_WRITE
+              storefront: PUBLIC_READ
+            }
           }
         ) {
           createdDefinition { id namespace key }

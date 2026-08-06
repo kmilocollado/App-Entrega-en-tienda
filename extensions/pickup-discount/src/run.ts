@@ -84,7 +84,7 @@ export function run(input: RunInput): FunctionRunResult {
 
   const pickupOptions = input.cart.deliveryGroups.flatMap((group) =>
     group.deliveryOptions.filter((opt) =>
-      isPickupOption(opt.title, matchers),
+      isPickupOption(opt.title, matchers, shopCfg?.displayName),
     ),
   );
 
@@ -238,9 +238,15 @@ function computeTargetPrice(
 function isPickupOption(
   title: string | undefined | null,
   matchers: string[],
+  displayName?: string | null,
 ): boolean {
-  if (!title || !matchers?.length) return false;
+  if (!title?.trim()) return false;
   const t = normalize(title);
+  if (displayName?.trim()) {
+    const dn = normalize(displayName);
+    if (dn && (t === dn || t.includes(dn))) return true;
+  }
+  if (!matchers?.length) return false;
   return matchers.some((m) => t.includes(normalize(m)));
 }
 

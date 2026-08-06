@@ -69,7 +69,6 @@ export function cartDeliveryOptionsTransformRun(
       const hasGeoSignal = Boolean(
         addr?.city?.trim() || addr?.zip?.trim() || addr?.provinceCode?.trim(),
       );
-      // Sin dirección usable aún (checkout por pasos): no ocultar la tarifa.
       if (!hasGeoSignal) {
         continue;
       }
@@ -78,26 +77,73 @@ export function cartDeliveryOptionsTransformRun(
         inCountry(addr, cfg) &&
         isEligibleForGeo(addr, cfg);
 
-      if (!eligible) {
+      if (eligible) {
         operations.push({
-          deliveryOptionHide: { deliveryOptionHandle: opt.handle },
+          deliveryOptionRename: {
+            deliveryOptionHandle: opt.handle,
+            title: cfg.displayName,
+          },
         } as Operation);
         continue;
       }
 
-      /**
-       * Solo renombramos: el importe lo define la tarifa manual de envío en Admin.
-       */
-      operations.push({
-        deliveryOptionRename: {
-          deliveryOptionHandle: opt.handle,
-          title: cfg.displayName,
-        },
-      } as Operation);
+      // Solo ocultar si hay CP/ciudad+provincia claros; evita parpadeos en checkout.
+      if (hasConfidentOutsideSignal(addr, cfg)) {
+        operations.push({
+          deliveryOptionHide: { deliveryOptionHandle: opt.handle },
+        } as Operation);
+      }
     }
   }
 
   return { operations };
+}
+
+function hasConfidentOutsideSignal(
+  addr: {
+    city?: string | null;
+    zip?: string | null;
+    provinceCode?: string | null;
+    countryCode?: string | null;
+  },
+  cfg: EntregaTiendaConfig,
+): boolean {
+  const explicitCountry = addr.countryCode?.trim();
+  if (explicitCountry && !inCountry(addr, cfg)) {
+    return true;
+  }
+
+  const zipDigits = addr.zip?.replace(/\D/g, "") ?? "";
+  if (zipDigits.length >= 5 && cfg.zipRanges?.length) {
+    const inZip = cfg.zipRanges.some((r) =>
+      zipInNumericRange(zipDigits, r.from, r.to),
+    );
+    if (!inZip) return true;
+  }
+
+  if (addr.city?.trim() && cfg.cities?.length) {
+    const city = normalize(addr.city);
+    const cityMatch = cfg.cities.some((c) => normalize(c) === city);
+    if (!cityMatch && zipDigits.length >= 5) {
+      const inZip = cfg.zipRanges?.some((r) =>
+        zipInNumericRange(zipDigits, r.from, r.to),
+      );
+      if (!inZip) return true;
+    }
+  }
+
+  return false;
+}
+
+function zipInNumericRange(zipDigits: string, from: string, to: string): boolean {
+  const a = from.replace(/\D/g, "");
+  const b = to.replace(/\D/g, "");
+  if (!zipDigits || !a || !b) return false;
+  if (zipDigits.length === a.length && a.length === b.length) {
+    const z = parseInt(zipDigits, 10);
+    return z >= parseInt(a, 10) && z <= parseInt(b, 10);
+  }
+  return zipDigits >= a && zipDigits <= b;
 }
 
 function isPickupOption(

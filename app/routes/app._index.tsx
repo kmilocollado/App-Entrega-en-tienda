@@ -125,7 +125,12 @@ export default function Index() {
             para cambiar ciudades, códigos postales y dirección de la tienda.
           </s-list-item>
           <s-list-item>
-            Probar el checkout con una dirección de Madrid (p. ej. CP 28045).
+            En <s-text type="strong">Configuración → Checkout → Personalizar</s-text>,
+            añade el bloque <s-text type="strong">Entrega en tienda — UI</s-text>{" "}
+            en la sección de envío (banner + cambio de dirección a tienda).
+          </s-list-item>
+          <s-list-item>
+            Probar el checkout con una dirección de Madrid (p. ej. CP 28042) en incógnito.
           </s-list-item>
         </s-unordered-list>
       </s-section>
