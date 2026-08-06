@@ -66,8 +66,15 @@ export function cartDeliveryOptionsTransformRun(
           : null,
       );
 
+      const hasGeoSignal = Boolean(
+        addr?.city?.trim() || addr?.zip?.trim() || addr?.provinceCode?.trim(),
+      );
+      // Sin dirección usable aún (checkout por pasos): no ocultar la tarifa.
+      if (!hasGeoSignal) {
+        continue;
+      }
+
       const eligible =
-        !!addr &&
         inCountry(addr, cfg) &&
         isEligibleForGeo(addr, cfg);
 
