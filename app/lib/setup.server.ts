@@ -47,6 +47,13 @@ function userErrorsMessage(
   return userErrors.map((e) => e.message).join("; ");
 }
 
+function graphqlErrorsMessage(
+  errors: Array<{ message: string }> | null | undefined,
+): string | null {
+  if (!errors?.length) return null;
+  return errors.map((e) => e.message).join("; ");
+}
+
 async function graphql<T>(
   admin: AdminApiContext,
   query: string,
@@ -60,24 +67,35 @@ async function graphql<T>(
 async function resolveFunctionId(
   admin: AdminApiContext,
   titleIncludes: string,
+  apiTypeIncludes?: string,
 ): Promise<string | null> {
   const result = await graphql<{
     shopifyFunctions: {
-      nodes: Array<{ id: string; title: string }>;
+      nodes: Array<{ id: string; title: string; apiType: string }>;
     };
   }>(
     admin,
     `#graphql
       query ListShopifyFunctions {
         shopifyFunctions(first: 25) {
-          nodes { id title }
+          nodes { id title apiType }
         }
       }`,
   );
 
-  const node = result.data?.shopifyFunctions.nodes.find((n) =>
-    n.title.includes(titleIncludes),
-  );
+  const gqlErr = graphqlErrorsMessage(result.errors);
+  if (gqlErr && !result.data) {
+    return null;
+  }
+
+  const nodes = result.data?.shopifyFunctions.nodes ?? [];
+  const node =
+    nodes.find(
+      (n) =>
+        n.title.includes(titleIncludes) &&
+        (!apiTypeIncludes || n.apiType.toLowerCase().includes(apiTypeIncludes)),
+    ) ??
+    nodes.find((n) => n.title.includes(titleIncludes));
   return node?.id ?? null;
 }
 
@@ -229,7 +247,11 @@ async function ensureShippingDiscount(
     };
   }
 
-  const functionId = await resolveFunctionId(admin, "Shipping Discount");
+  const functionId = await resolveFunctionId(
+    admin,
+    "Shipping Discount",
+    "shipping",
+  );
   if (!functionId) {
     return {
       ok: false,
@@ -257,9 +279,15 @@ async function ensureShippingDiscount(
         title: SHIPPING_DISCOUNT_TITLE,
         functionId,
         startsAt: new Date().toISOString(),
+        discountClasses: ["SHIPPING"],
       },
     },
   );
+
+  const gqlErr = graphqlErrorsMessage(created.errors);
+  if (gqlErr && !created.data?.discountAutomaticAppCreate) {
+    return { ok: false, message: gqlErr };
+  }
 
   const payload = created.data?.discountAutomaticAppCreate;
   const err = userErrorsMessage(payload?.userErrors);
