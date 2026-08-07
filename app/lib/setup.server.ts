@@ -501,29 +501,34 @@ async function ensureShippingDiscount(
   return { ok: false, message: "No se pudo crear el descuento de envío." };
 }
 
-async function ensureMetafieldDefinition(
+async function shopMetafieldDefinitionExists(
   admin: AdminApiContext,
-): Promise<SetupStepResult> {
-  const existing = await graphql<{
-    metafieldDefinitions: {
-      nodes: Array<{ id: string; key: string; namespace: string }>;
-    };
+): Promise<boolean> {
+  const result = await graphql<{
+    metafieldDefinition: { id: string } | null;
   }>(
     admin,
     `#graphql
       query ShopEntregaMetafieldDefinition {
-        metafieldDefinitions(
-          first: 1
-          ownerType: SHOP
-          namespace: "${SHOP_METAFIELD_NAMESPACE}"
-          key: "${SHOP_METAFIELD_KEY}"
+        metafieldDefinition(
+          identifier: {
+            namespace: "${SHOP_METAFIELD_NAMESPACE}"
+            key: "${SHOP_METAFIELD_KEY}"
+            ownerType: SHOP
+          }
         ) {
-          nodes { id key namespace }
+          id
         }
       }`,
   );
 
-  if (existing.data?.metafieldDefinitions?.nodes?.length) {
+  return Boolean(result.data?.metafieldDefinition?.id);
+}
+
+async function ensureMetafieldDefinition(
+  admin: AdminApiContext,
+): Promise<SetupStepResult> {
+  if (await shopMetafieldDefinitionExists(admin)) {
     return {
       ok: true,
       message: "Definición del metacampo de tienda ya existía.",
@@ -547,9 +552,6 @@ async function ensureMetafieldDefinition(
             description: "Ciudades, códigos postales, dirección de tienda y precios."
             type: "json"
             ownerType: SHOP
-            access: {
-              storefront: PUBLIC_READ
-            }
           }
         ) {
           createdDefinition { id namespace key }
@@ -558,27 +560,23 @@ async function ensureMetafieldDefinition(
       }`,
   );
 
-  const payload = created.data?.metafieldDefinitionCreate;
-  const err = userErrorsMessage(payload?.userErrors);
-  if (
-    err &&
-    !payload?.userErrors?.some((e) =>
-      /taken|already|exists|not permitted|access control/i.test(
-        `${e.message} ${e.code ?? ""}`,
-      ),
-    )
-  ) {
-    return { ok: false, message: err };
-  }
-  if (payload?.createdDefinition) {
+  if (await shopMetafieldDefinitionExists(admin)) {
+    const payload = created.data?.metafieldDefinitionCreate;
     return {
       ok: true,
-      message: "Definición del metacampo de tienda creada.",
+      message: payload?.createdDefinition
+        ? "Definición del metacampo de tienda creada."
+        : "Definición del metacampo de tienda ya existía.",
     };
   }
+
+  const payload = created.data?.metafieldDefinitionCreate;
+  const err =
+    userErrorsMessage(payload?.userErrors) ??
+    graphqlErrorsMessage(created.errors);
   return {
-    ok: true,
-    message: "Definición del metacampo de tienda ya existía.",
+    ok: false,
+    message: err ?? "No se pudo crear la definición del metacampo de tienda.",
   };
 }
 
