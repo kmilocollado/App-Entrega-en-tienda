@@ -39,7 +39,7 @@ function addressMatchesPickupBranch(addr, branch) {
     return zStore === zAddr;
   }
   if (branch.city && addr.city) {
-    return normalize(branch.city) === normalize(addr.city);
+    return normalize2(branch.city) === normalize2(addr.city);
   }
   return false;
 }
@@ -47,11 +47,11 @@ function addressesRoughlyEqual(a, b) {
   const za = a.zip?.replace(/\D/g, "") ?? "";
   const zb = b.zip?.replace(/\D/g, "") ?? "";
   if (za && zb && za !== zb) return false;
-  const ca = a.city ? normalize(a.city) : "";
-  const cb = b.city ? normalize(b.city) : "";
+  const ca = a.city ? normalize2(a.city) : "";
+  const cb = b.city ? normalize2(b.city) : "";
   if (ca && cb && ca !== cb) return false;
-  const pa = a.provinceCode ? normalize(a.provinceCode) : "";
-  const pb = b.provinceCode ? normalize(b.provinceCode) : "";
+  const pa = a.provinceCode ? normalize2(a.provinceCode) : "";
+  const pb = b.provinceCode ? normalize2(b.provinceCode) : "";
   if (pa && pb && pa !== pb) return false;
   return Boolean(za && zb || ca && cb || pa && pb);
 }
@@ -76,8 +76,8 @@ function resolveAddressForGeoRule(currentGroup, method, allGroups, billing) {
 }
 function inCountry(addr, cfg) {
   if (!cfg.countryCode) return true;
-  const want = normalize(String(cfg.countryCode));
-  const have = addr.countryCode ? normalize(String(addr.countryCode)) : "";
+  const want = normalize2(String(cfg.countryCode));
+  const have = addr.countryCode ? normalize2(String(addr.countryCode)) : "";
   if (have && have === want) return true;
   if (!have && want === "es") {
     return Boolean(addr.city?.trim() || addr.zip?.trim() || addr.provinceCode?.trim());
@@ -87,11 +87,11 @@ function inCountry(addr, cfg) {
 function isEligibleForGeo(addr, cfg) {
   const checks = [];
   if (cfg.cities?.length && addr.city?.trim()) {
-    const city = normalize(addr.city);
-    checks.push(cfg.cities.some((c) => normalize(c) === city));
+    const city = normalize2(addr.city);
+    checks.push(cfg.cities.some((c) => normalize2(c) === city));
   }
   if (cfg.provinces?.length && addr.provinceCode?.trim()) {
-    const provinceCode = normalize(addr.provinceCode);
+    const provinceCode = normalize2(addr.provinceCode);
     checks.push(
       cfg.provinces.some(
         (p) => provinceCodesMatch(p, provinceCode, addr.countryCode)
@@ -108,10 +108,10 @@ function isEligibleForGeo(addr, cfg) {
   return cfg.matchMode === "all" ? checks.every(Boolean) : checks.some(Boolean);
 }
 function provinceCodesMatch(cfgProvince, addrProvince, countryCode) {
-  const n = normalize(cfgProvince);
-  const p = normalize(addrProvince);
+  const n = normalize2(cfgProvince);
+  const p = normalize2(addrProvince);
   if (n === p) return true;
-  const c = countryCode ? normalize(String(countryCode)) : "";
+  const c = countryCode ? normalize2(String(countryCode)) : "";
   if (c && c !== "es") return false;
   const cfgMadrid = n === "md" || n === "m" || n === "madrid";
   const addrMadrid = p === "m" || p === "md" || p === "madrid";
@@ -127,8 +127,40 @@ function zipInNumericRange(zipDigits, from, to) {
   }
   return zipDigits >= a && zipDigits <= b;
 }
-function normalize(s) {
+function normalize2(s) {
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+}
+
+// extensions/entrega-tienda-delivery/src/delivery_option_match.ts
+var EXCLUDE_TITLE_FRAGMENTS = [
+  "punto de servicio",
+  "service point",
+  "sendcloud",
+  "pickup point",
+  "pickuppoint"
+];
+function normalizeTitle(s) {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+}
+function baseShippingTitle(title) {
+  const parts = title.trim().split(/\s*[·•|]\s*|\s+[-–]\s+/);
+  return parts[0]?.trim() ?? title.trim();
+}
+function isExcludedCarrierPickupTitle(title) {
+  const base = normalizeTitle(baseShippingTitle(title));
+  return EXCLUDE_TITLE_FRAGMENTS.some((frag) => base.includes(normalizeTitle(frag)));
+}
+function matchesOriginalShippingRateTitle(title, matchers) {
+  if (!title?.trim() || !matchers?.length) return false;
+  if (isExcludedCarrierPickupTitle(title)) return false;
+  const base = normalizeTitle(baseShippingTitle(title));
+  for (const matcher of matchers) {
+    const nm = normalizeTitle(matcher);
+    if (!nm) continue;
+    if (base === nm) return true;
+    if (base.startsWith(`${nm} `) || base.startsWith(`${nm}(`)) return true;
+  }
+  return false;
 }
 
 // extensions/entrega-tienda-delivery/src/cart_delivery_options_transform_run.ts
@@ -140,7 +172,13 @@ function cartDeliveryOptionsTransformRun(input) {
   const groups = input.cart.deliveryGroups;
   for (const group of groups) {
     for (const opt of group.deliveryOptions) {
-      if (!isPickupOption(opt.title, cfg.pickupDeliveryOptionMatchers)) {
+      if (opt.deliveryMethodType !== "SHIPPING" /* Shipping */) {
+        continue;
+      }
+      if (!matchesOriginalShippingRateTitle(
+        opt.title,
+        cfg.pickupDeliveryOptionMatchers
+      )) {
         continue;
       }
       const rawAddr = resolveAddressForGeoRule(
@@ -192,8 +230,8 @@ function hasConfidentOutsideSignal(addr, cfg) {
     if (!inZip) return true;
   }
   if (addr.city?.trim() && cfg.cities?.length) {
-    const city = normalize2(addr.city);
-    const cityMatch = cfg.cities.some((c) => normalize2(c) === city);
+    const city = normalize(addr.city);
+    const cityMatch = cfg.cities.some((c) => normalize(c) === city);
     if (!cityMatch && zipDigits.length >= 5) {
       const inZip = cfg.zipRanges?.some(
         (r) => zipInNumericRange2(zipDigits, r.from, r.to)
@@ -212,14 +250,6 @@ function zipInNumericRange2(zipDigits, from, to) {
     return z >= parseInt(a, 10) && z <= parseInt(b, 10);
   }
   return zipDigits >= a && zipDigits <= b;
-}
-function isPickupOption(title, matchers) {
-  if (!title || !matchers?.length) return false;
-  const t = normalize2(title);
-  return matchers.some((m) => t.includes(normalize2(m)));
-}
-function normalize2(s) {
-  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
 }
 
 // <stdin>

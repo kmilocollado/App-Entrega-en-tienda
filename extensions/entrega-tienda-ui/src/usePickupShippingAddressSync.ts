@@ -282,7 +282,7 @@ export function usePickupShippingAddressSync(): void {
         const opt = group.deliveryOptions.find(
           (o) => o.handle === selectedHandle,
         );
-        return matchesPickupDeliveryTitle(opt?.title, cfg);
+        return matchesPickupDeliveryTitle(opt?.title, cfg, opt);
       }),
   );
 

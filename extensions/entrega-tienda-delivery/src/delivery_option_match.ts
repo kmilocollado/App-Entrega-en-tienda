@@ -1,9 +1,10 @@
-/** Fragmentos que identifican carriers / pickup points (Sendcloud, etc.). Nunca tocar. */
+/** Fragmentos que identifican carriers / pickup points (Sendcloud, etc.). */
 const EXCLUDE_TITLE_FRAGMENTS = [
   "punto de servicio",
   "service point",
   "sendcloud",
   "pickup point",
+  "pickuppoint",
 ];
 
 export function normalizeTitle(s: string): string {
@@ -14,7 +15,6 @@ export function normalizeTitle(s: string): string {
     .toLowerCase();
 }
 
-/** Quita precio/plazo que Shopify añade: "Entrega en tienda · Gratis". */
 export function baseShippingTitle(title: string): string {
   const parts = title.trim().split(/\s*[·•|]\s*|\s+[-–]\s+/);
   return parts[0]?.trim() ?? title.trim();
@@ -26,25 +26,17 @@ export function isExcludedCarrierPickupTitle(title: string): boolean {
 }
 
 /**
- * Solo la tarifa manual creada en Admin (nombre exacto o prefijo).
- * No usa `includes("recogida")` para no capturar Sendcloud u otros pickup points.
+ * Solo la tarifa manual original en Admin (ej. "Entrega en tienda").
+ * No usa displayName: evita colisión con Sendcloud u otros títulos "Recogida…".
  */
-export function matchesEntregaTiendaShippingRate(
+export function matchesOriginalShippingRateTitle(
   title: string | null | undefined,
   matchers: string[],
-  displayName?: string | null,
 ): boolean {
   if (!title?.trim() || !matchers?.length) return false;
   if (isExcludedCarrierPickupTitle(title)) return false;
 
   const base = normalizeTitle(baseShippingTitle(title));
-
-  if (displayName?.trim()) {
-    const dn = normalizeTitle(displayName);
-    if (base === dn || base.startsWith(`${dn} `) || base.startsWith(`${dn}(`)) {
-      return true;
-    }
-  }
 
   for (const matcher of matchers) {
     const nm = normalizeTitle(matcher);

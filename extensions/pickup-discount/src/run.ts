@@ -7,7 +7,7 @@ import {
   pickAddressForGeo,
   resolveCustomerShippingAddress,
 } from "./geo_eligibility";
-import { matchesEntregaTiendaShippingRate } from "./delivery_option_match";
+import { matchesOriginalShippingRateTitle } from "./delivery_option_match";
 
 /** Si no hay precio válido ni en descuento ni en JSON tienda. */
 const DEFAULT_DISCOUNT_PRICE = 4.99;
@@ -89,11 +89,7 @@ export function run(input: RunInput): FunctionRunResult {
     group.deliveryOptions.filter(
       (opt) =>
         opt.deliveryMethodType === DeliveryMethod.Shipping &&
-        matchesEntregaTiendaShippingRate(
-          opt.title,
-          matchers,
-          shopCfg?.displayName,
-        ),
+        matchesOriginalShippingRateTitle(opt.title, matchers),
     ),
   );
 

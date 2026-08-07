@@ -504,6 +504,32 @@ async function ensureShippingDiscount(
 async function ensureMetafieldDefinition(
   admin: AdminApiContext,
 ): Promise<SetupStepResult> {
+  const existing = await graphql<{
+    metafieldDefinitions: {
+      nodes: Array<{ id: string; key: string; namespace: string }>;
+    };
+  }>(
+    admin,
+    `#graphql
+      query ShopEntregaMetafieldDefinition {
+        metafieldDefinitions(
+          first: 1
+          ownerType: SHOP
+          namespace: "${SHOP_METAFIELD_NAMESPACE}"
+          key: "${SHOP_METAFIELD_KEY}"
+        ) {
+          nodes { id key namespace }
+        }
+      }`,
+  );
+
+  if (existing.data?.metafieldDefinitions?.nodes?.length) {
+    return {
+      ok: true,
+      message: "Definición del metacampo de tienda ya existía.",
+    };
+  }
+
   const created = await graphql<{
     metafieldDefinitionCreate: {
       createdDefinition: { id: string; key: string } | null;
@@ -522,7 +548,6 @@ async function ensureMetafieldDefinition(
             type: "json"
             ownerType: SHOP
             access: {
-              admin: MERCHANT_READ_WRITE
               storefront: PUBLIC_READ
             }
           }
@@ -538,7 +563,9 @@ async function ensureMetafieldDefinition(
   if (
     err &&
     !payload?.userErrors?.some((e) =>
-      /taken|already|exists/i.test(`${e.message} ${e.code ?? ""}`),
+      /taken|already|exists|not permitted|access control/i.test(
+        `${e.message} ${e.code ?? ""}`,
+      ),
     )
   ) {
     return { ok: false, message: err };

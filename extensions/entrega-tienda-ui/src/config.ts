@@ -1,4 +1,7 @@
-import { matchesEntregaTiendaShippingRate } from "./deliveryOptionMatch";
+import {
+  matchesOriginalShippingRateTitle,
+  matchesRenamedDisplayTitle,
+} from "./deliveryOptionMatch";
 
 export type StoreAddress = {
   first_name: string;
@@ -25,27 +28,35 @@ export type EntregaTiendaUIConfig = {
   storeAddress: StoreAddress;
 };
 
-export function isPickupOption(
-  title: string | undefined | null,
-  matchers: string[] | undefined,
+type CheckoutDeliveryOption = {
+  title?: string;
+  type?: string;
+};
+
+/** Sendcloud y otros pickup points usan type pickupPoint; no tocar. */
+export function isManualShippingDeliveryOption(
+  opt: CheckoutDeliveryOption | undefined | null,
 ): boolean {
-  if (!matchers?.length) return false;
-  return matchesEntregaTiendaShippingRate(title, matchers);
+  if (!opt?.type) return true;
+  return opt.type === "shipping" || opt.type === "local";
 }
 
 /**
- * Detecta la tarifa manual de entrega en tienda (no Sendcloud / pickup points).
+ * Tarifa manual "Entrega en tienda" (SHIPPING), no Sendcloud pickupPoint.
  */
 export function matchesPickupDeliveryTitle(
   title: string | undefined | null,
   cfg: PickupMatchInput,
+  opt?: CheckoutDeliveryOption | null,
 ): boolean {
   if (!title?.trim() || !cfg) return false;
-  return matchesEntregaTiendaShippingRate(
-    title,
-    cfg.pickupDeliveryOptionMatchers ?? [],
-    cfg.displayName,
-  );
+  if (opt && !isManualShippingDeliveryOption(opt)) return false;
+
+  const matchers = cfg.pickupDeliveryOptionMatchers ?? [];
+  if (matchesOriginalShippingRateTitle(title, matchers)) return true;
+
+  // Tras rename por la function; solo shipping/local (Sendcloud pickupPoint excluido arriba).
+  return matchesRenamedDisplayTitle(title, cfg.displayName);
 }
 
 export type PickupMatchInput = {

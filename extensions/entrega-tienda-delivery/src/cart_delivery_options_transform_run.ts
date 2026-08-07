@@ -10,7 +10,7 @@ import {
   pickAddressForGeo,
   resolveAddressForGeoRule,
 } from "./geo_eligibility";
-import { matchesEntregaTiendaShippingRate } from "./delivery_option_match";
+import { matchesOriginalShippingRateTitle } from "./delivery_option_match";
 
 type ZipRange = { from: string; to: string };
 
@@ -51,10 +51,9 @@ export function cartDeliveryOptionsTransformRun(
         continue;
       }
       if (
-        !matchesEntregaTiendaShippingRate(
+        !matchesOriginalShippingRateTitle(
           opt.title,
           cfg.pickupDeliveryOptionMatchers,
-          cfg.displayName,
         )
       ) {
         continue;

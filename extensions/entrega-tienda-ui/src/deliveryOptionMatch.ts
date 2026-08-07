@@ -1,11 +1,9 @@
-/**
- * Coincide solo con la tarifa manual "Entrega en tienda", no con Sendcloud u otros pickup points.
- */
 const EXCLUDE_TITLE_FRAGMENTS = [
   "punto de servicio",
   "service point",
   "sendcloud",
   "pickup point",
+  "pickuppoint",
 ];
 
 export function normalizeTitle(s: string): string {
@@ -26,22 +24,14 @@ export function isExcludedCarrierPickupTitle(title: string): boolean {
   return EXCLUDE_TITLE_FRAGMENTS.some((frag) => base.includes(normalizeTitle(frag)));
 }
 
-export function matchesEntregaTiendaShippingRate(
+export function matchesOriginalShippingRateTitle(
   title: string | null | undefined,
   matchers: string[],
-  displayName?: string | null,
 ): boolean {
   if (!title?.trim() || !matchers?.length) return false;
   if (isExcludedCarrierPickupTitle(title)) return false;
 
   const base = normalizeTitle(baseShippingTitle(title));
-
-  if (displayName?.trim()) {
-    const dn = normalizeTitle(displayName);
-    if (base === dn || base.startsWith(`${dn} `) || base.startsWith(`${dn}(`)) {
-      return true;
-    }
-  }
 
   for (const matcher of matchers) {
     const nm = normalizeTitle(matcher);
@@ -51,4 +41,16 @@ export function matchesEntregaTiendaShippingRate(
   }
 
   return false;
+}
+
+/** Tras rename en checkout; solo válido con type shipping/local en la UI. */
+export function matchesRenamedDisplayTitle(
+  title: string | null | undefined,
+  displayName: string | null | undefined,
+): boolean {
+  if (!title?.trim() || !displayName?.trim()) return false;
+  if (isExcludedCarrierPickupTitle(title)) return false;
+  const base = normalizeTitle(baseShippingTitle(title));
+  const dn = normalizeTitle(displayName);
+  return base === dn || base.startsWith(`${dn} `) || base.startsWith(`${dn}(`);
 }
