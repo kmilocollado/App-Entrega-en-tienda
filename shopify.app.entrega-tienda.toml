@@ -23,8 +23,15 @@ api_version = "2026-07"
 scopes = "read_locations,read_orders,read_shipping,write_orders,read_delivery_customizations,write_delivery_customizations,write_discounts"
 
 [auth]
-redirect_urls = [
+  redirect_urls = [
   "https://app-entrega-en-tienda.onrender.com/auth/callback",
   "https://app-entrega-en-tienda.onrender.com/auth/shopify/callback",
   "https://app-entrega-en-tienda.onrender.com/api/auth/callback"
 ]
+
+[shop.metafields.app.entrega_tienda_config]
+name = "Entrega en tienda — configuración"
+description = "Ciudades, códigos postales, dirección de tienda y precios."
+type = "json"
+access.admin = "merchant_read_write"
+access.storefront = "public_read"

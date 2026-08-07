@@ -269,7 +269,7 @@ export function usePickupShippingAddressSync(): void {
 
   const meta = useAppMetafields({
     type: "shop",
-    namespace: "custom",
+    namespace: "$app",
     key: "entrega_tienda_config",
   });
   const cfg = parseEntregaConfigFromAppMetafields(meta);

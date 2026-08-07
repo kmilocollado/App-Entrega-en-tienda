@@ -3,8 +3,10 @@ import type { SetupStatus, SetupStepResult } from "./setup.shared";
 
 const DELIVERY_CUSTOMIZATION_TITLE = "Entrega en tienda — Delivery Customization";
 const SHIPPING_DISCOUNT_TITLE = "Entrega en tienda — Shipping Discount";
-const SHOP_METAFIELD_NAMESPACE = "custom";
+const SHOP_METAFIELD_NAMESPACE = "$app";
 const SHOP_METAFIELD_KEY = "entrega_tienda_config";
+/** Namespace legacy (merchant-owned); solo lectura para migrar valores. */
+const LEGACY_SHOP_METAFIELD_NAMESPACE = "custom";
 const DISCOUNT_FUNCTION_CONFIG_JSON = JSON.stringify({
   enabled: true,
   defaultPrice: 4.99,
@@ -552,6 +554,10 @@ async function ensureMetafieldDefinition(
             description: "Ciudades, códigos postales, dirección de tienda y precios."
             type: "json"
             ownerType: SHOP
+            access: {
+              admin: MERCHANT_READ_WRITE
+              storefront: PUBLIC_READ
+            }
           }
         ) {
           createdDefinition { id namespace key }
@@ -620,7 +626,8 @@ async function ensureShopMetafieldValue(
   const shopQuery = await graphql<{
     shop: {
       id: string;
-      metafield: { id: string; jsonValue?: unknown } | null;
+      appConfig: { id: string; jsonValue?: unknown } | null;
+      legacyConfig: { id: string; jsonValue?: unknown } | null;
     };
   }>(
     admin,
@@ -628,7 +635,11 @@ async function ensureShopMetafieldValue(
       query ShopEntregaConfig {
         shop {
           id
-          metafield(namespace: "${SHOP_METAFIELD_NAMESPACE}", key: "${SHOP_METAFIELD_KEY}") {
+          appConfig: metafield(namespace: "${SHOP_METAFIELD_NAMESPACE}", key: "${SHOP_METAFIELD_KEY}") {
+            id
+            jsonValue
+          }
+          legacyConfig: metafield(namespace: "${LEGACY_SHOP_METAFIELD_NAMESPACE}", key: "${SHOP_METAFIELD_KEY}") {
             id
             jsonValue
           }
@@ -641,7 +652,9 @@ async function ensureShopMetafieldValue(
     return { ok: false, message: "No se pudo leer el ID de la tienda." };
   }
 
-  const existing = shopQuery.data?.shop.metafield;
+  const existing = shopQuery.data?.shop.appConfig;
+  const legacy = shopQuery.data?.shop.legacyConfig;
+
   if (existing?.id) {
     const raw =
       existing.jsonValue != null &&
@@ -697,6 +710,16 @@ async function ensureShopMetafieldValue(
     };
   }
 
+  const legacyRaw =
+    legacy?.jsonValue != null &&
+    typeof legacy.jsonValue === "object" &&
+    !Array.isArray(legacy.jsonValue)
+      ? (legacy.jsonValue as Record<string, unknown>)
+      : null;
+  const initialValue = legacyRaw
+    ? (repairEntregaConfigJson(legacyRaw) ?? legacyRaw)
+    : DEFAULT_ENTREGA_CONFIG;
+
   const set = await graphql<{
     metafieldsSet: {
       metafields: Array<{ id: string }> | null;
@@ -718,7 +741,7 @@ async function ensureShopMetafieldValue(
           namespace: SHOP_METAFIELD_NAMESPACE,
           key: SHOP_METAFIELD_KEY,
           type: "json",
-          value: JSON.stringify(DEFAULT_ENTREGA_CONFIG),
+          value: JSON.stringify(initialValue),
         },
       ],
     },
@@ -732,7 +755,9 @@ async function ensureShopMetafieldValue(
   if (payload?.metafields?.length) {
     return {
       ok: true,
-      message: "Configuración inicial de tienda cargada.",
+      message: legacyRaw
+        ? "Configuración migrada del metacampo legacy (custom) a $app."
+        : "Configuración inicial de tienda cargada.",
     };
   }
   return { ok: false, message: "No se pudo guardar la configuración de tienda." };

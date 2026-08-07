@@ -24,7 +24,7 @@ query CartDeliveryOptionsTransformRunInput {
     }
   }
   shop {
-    metafield(namespace: "custom", key: "entrega_tienda_config") {
+    metafield(namespace: "$app", key: "entrega_tienda_config") {
       jsonValue
     }
   }

@@ -20,8 +20,9 @@ if (process.env.NODE_ENV !== "production") {
 const prisma = global.prismaGlobal ?? new PrismaClient();
 const DELIVERY_CUSTOMIZATION_TITLE = "Entrega en tienda — Delivery Customization";
 const SHIPPING_DISCOUNT_TITLE = "Entrega en tienda — Shipping Discount";
-const SHOP_METAFIELD_NAMESPACE = "custom";
+const SHOP_METAFIELD_NAMESPACE = "$app";
 const SHOP_METAFIELD_KEY = "entrega_tienda_config";
+const LEGACY_SHOP_METAFIELD_NAMESPACE = "custom";
 const DISCOUNT_FUNCTION_CONFIG_JSON = JSON.stringify({
   enabled: true,
   defaultPrice: 4.99,
@@ -428,6 +429,10 @@ async function ensureMetafieldDefinition(admin) {
             description: "Ciudades, códigos postales, dirección de tienda y precios."
             type: "json"
             ownerType: SHOP
+            access: {
+              admin: MERCHANT_READ_WRITE
+              storefront: PUBLIC_READ
+            }
           }
         ) {
           createdDefinition { id namespace key }
@@ -472,14 +477,18 @@ function repairEntregaConfigJson(raw) {
   };
 }
 async function ensureShopMetafieldValue(admin) {
-  var _a2, _b, _c, _d, _e;
+  var _a2, _b, _c, _d, _e, _f;
   const shopQuery = await graphql(
     admin,
     `#graphql
       query ShopEntregaConfig {
         shop {
           id
-          metafield(namespace: "${SHOP_METAFIELD_NAMESPACE}", key: "${SHOP_METAFIELD_KEY}") {
+          appConfig: metafield(namespace: "${SHOP_METAFIELD_NAMESPACE}", key: "${SHOP_METAFIELD_KEY}") {
+            id
+            jsonValue
+          }
+          legacyConfig: metafield(namespace: "${LEGACY_SHOP_METAFIELD_NAMESPACE}", key: "${SHOP_METAFIELD_KEY}") {
             id
             jsonValue
           }
@@ -490,7 +499,8 @@ async function ensureShopMetafieldValue(admin) {
   if (!shopId) {
     return { ok: false, message: "No se pudo leer el ID de la tienda." };
   }
-  const existing = (_b = shopQuery.data) == null ? void 0 : _b.shop.metafield;
+  const existing = (_b = shopQuery.data) == null ? void 0 : _b.shop.appConfig;
+  const legacy = (_c = shopQuery.data) == null ? void 0 : _c.shop.legacyConfig;
   if (existing == null ? void 0 : existing.id) {
     const raw = existing.jsonValue != null && typeof existing.jsonValue === "object" && !Array.isArray(existing.jsonValue) ? existing.jsonValue : null;
     const repaired = raw ? repairEntregaConfigJson(raw) : null;
@@ -516,7 +526,7 @@ async function ensureShopMetafieldValue(admin) {
           ]
         }
       );
-      const payload2 = (_c = set2.data) == null ? void 0 : _c.metafieldsSet;
+      const payload2 = (_d = set2.data) == null ? void 0 : _d.metafieldsSet;
       const err2 = userErrorsMessage(payload2 == null ? void 0 : payload2.userErrors);
       if (err2) {
         return {
@@ -534,6 +544,8 @@ async function ensureShopMetafieldValue(admin) {
       message: "Configuración de tienda (metacampo) ya cargada."
     };
   }
+  const legacyRaw = (legacy == null ? void 0 : legacy.jsonValue) != null && typeof legacy.jsonValue === "object" && !Array.isArray(legacy.jsonValue) ? legacy.jsonValue : null;
+  const initialValue = legacyRaw ? repairEntregaConfigJson(legacyRaw) ?? legacyRaw : DEFAULT_ENTREGA_CONFIG;
   const set = await graphql(
     admin,
     `#graphql
@@ -550,20 +562,20 @@ async function ensureShopMetafieldValue(admin) {
           namespace: SHOP_METAFIELD_NAMESPACE,
           key: SHOP_METAFIELD_KEY,
           type: "json",
-          value: JSON.stringify(DEFAULT_ENTREGA_CONFIG)
+          value: JSON.stringify(initialValue)
         }
       ]
     }
   );
-  const payload = (_d = set.data) == null ? void 0 : _d.metafieldsSet;
+  const payload = (_e = set.data) == null ? void 0 : _e.metafieldsSet;
   const err = userErrorsMessage(payload == null ? void 0 : payload.userErrors);
   if (err) {
     return { ok: false, message: err };
   }
-  if ((_e = payload == null ? void 0 : payload.metafields) == null ? void 0 : _e.length) {
+  if ((_f = payload == null ? void 0 : payload.metafields) == null ? void 0 : _f.length) {
     return {
       ok: true,
-      message: "Configuración inicial de tienda cargada."
+      message: legacyRaw ? "Configuración migrada del metacampo legacy (custom) a $app." : "Configuración inicial de tienda cargada."
     };
   }
   return { ok: false, message: "No se pudo guardar la configuración de tienda." };

@@ -1,7 +1,7 @@
 import type { AppMetafieldEntry } from "@shopify/ui-extensions/checkout";
 import type { EntregaTiendaUIConfig, StoreAddress } from "./config";
 
-const NS = "custom";
+const NS = "$app";
 const KEY = "entrega_tienda_config";
 
 function firstNonEmptyString(values: unknown[]): string | undefined {

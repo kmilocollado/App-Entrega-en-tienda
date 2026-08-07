@@ -15,5 +15,5 @@ type = "ui_extension"
   block_progress = false
 
   [[extensions.metafields]]
-  namespace = "custom"
+  namespace = "$app"
   key = "entrega_tienda_config"
