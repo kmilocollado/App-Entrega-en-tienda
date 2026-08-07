@@ -125,6 +125,11 @@ export default function Index() {
             para cambiar ciudades, códigos postales y dirección de la tienda.
           </s-list-item>
           <s-list-item>
+            Matcher del metacampo: solo{" "}
+            <s-text type="strong">Entrega en tienda</s-text>. No usar &quot;recogida&quot;
+            (conflicto con Sendcloud).
+          </s-list-item>
+          <s-list-item>
             En <s-text type="strong">Configuración → Checkout → Personalizar</s-text>,
             añade el bloque <s-text type="strong">Entrega en tienda — UI</s-text>{" "}
             en la sección de envío (banner + cambio de dirección a tienda).

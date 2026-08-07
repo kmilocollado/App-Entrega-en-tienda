@@ -70,6 +70,8 @@ En cada zona donde quieras ofrecer pickup (típicamente "Spain" / "España"):
 4. Sin condiciones de peso/precio. Guardar.
 
 > El nombre `Entrega en tienda` es lo que la function busca para filtrarlo. Si lo escribes diferente (`recogida`, `pickup`), añade ese texto a `pickupDeliveryOptionMatchers` en el shop metafield (paso 4).
+>
+> **No uses matchers genéricos como `recogida`**: también capturan Sendcloud y otros pickup points. Usa solo el nombre exacto de la tarifa manual (`Entrega en tienda`).
 
 ---
 

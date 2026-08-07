@@ -555,13 +555,47 @@ async function ensureMetafieldDefinition(
   };
 }
 
+function normalizeMatcherToken(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function hasUnsafePickupMatchers(matchers: string[]): boolean {
+  return matchers.some((m) => {
+    const n = normalizeMatcherToken(m);
+    if (!n) return true;
+    if (n === "recogida") return true;
+    if (n.includes("punto de servicio")) return true;
+    if (n.includes("sendcloud")) return true;
+    if (n.includes("recogida") && !n.includes("entrega en tienda")) return true;
+    return false;
+  });
+}
+
+function repairEntregaConfigJson(
+  raw: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const matchers = Array.isArray(raw.pickupDeliveryOptionMatchers)
+    ? (raw.pickupDeliveryOptionMatchers as string[])
+    : [];
+  if (!hasUnsafePickupMatchers(matchers)) return null;
+
+  return {
+    ...raw,
+    pickupDeliveryOptionMatchers: [...DEFAULT_ENTREGA_CONFIG.pickupDeliveryOptionMatchers],
+  };
+}
+
 async function ensureShopMetafieldValue(
   admin: AdminApiContext,
 ): Promise<SetupStepResult> {
   const shopQuery = await graphql<{
     shop: {
       id: string;
-      metafield: { id: string } | null;
+      metafield: { id: string; jsonValue?: unknown } | null;
     };
   }>(
     admin,
@@ -571,6 +605,7 @@ async function ensureShopMetafieldValue(
           id
           metafield(namespace: "${SHOP_METAFIELD_NAMESPACE}", key: "${SHOP_METAFIELD_KEY}") {
             id
+            jsonValue
           }
         }
       }`,
@@ -581,7 +616,56 @@ async function ensureShopMetafieldValue(
     return { ok: false, message: "No se pudo leer el ID de la tienda." };
   }
 
-  if (shopQuery.data?.shop.metafield?.id) {
+  const existing = shopQuery.data?.shop.metafield;
+  if (existing?.id) {
+    const raw =
+      existing.jsonValue != null &&
+      typeof existing.jsonValue === "object" &&
+      !Array.isArray(existing.jsonValue)
+        ? (existing.jsonValue as Record<string, unknown>)
+        : null;
+    const repaired = raw ? repairEntregaConfigJson(raw) : null;
+    if (repaired) {
+      const set = await graphql<{
+        metafieldsSet: {
+          metafields: Array<{ id: string }> | null;
+          userErrors: Array<{ message: string }>;
+        };
+      }>(
+        admin,
+        `#graphql
+          mutation RepairShopConfigMetafield($metafields: [MetafieldsSetInput!]!) {
+            metafieldsSet(metafields: $metafields) {
+              metafields { id namespace key }
+              userErrors { field message }
+            }
+          }`,
+        {
+          metafields: [
+            {
+              ownerId: shopId,
+              namespace: SHOP_METAFIELD_NAMESPACE,
+              key: SHOP_METAFIELD_KEY,
+              type: "json",
+              value: JSON.stringify(repaired),
+            },
+          ],
+        },
+      );
+      const payload = set.data?.metafieldsSet;
+      const err = userErrorsMessage(payload?.userErrors);
+      if (err) {
+        return {
+          ok: false,
+          message: `Matchers inseguros detectados pero no se pudo corregir: ${err}`,
+        };
+      }
+      return {
+        ok: true,
+        message:
+          "Matchers de envío corregidos (ya no afectan Sendcloud / pickup points).",
+      };
+    }
     return {
       ok: true,
       message: "Configuración de tienda (metacampo) ya cargada.",

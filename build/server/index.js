@@ -22,6 +22,12 @@ const DELIVERY_CUSTOMIZATION_TITLE = "Entrega en tienda — Delivery Customizati
 const SHIPPING_DISCOUNT_TITLE = "Entrega en tienda — Shipping Discount";
 const SHOP_METAFIELD_NAMESPACE = "custom";
 const SHOP_METAFIELD_KEY = "entrega_tienda_config";
+const DISCOUNT_FUNCTION_CONFIG_JSON = JSON.stringify({
+  enabled: true,
+  defaultPrice: 4.99,
+  freeShippingThresholdEnabled: true,
+  freeOverSubtotal: 100
+});
 const DEFAULT_ENTREGA_CONFIG = {
   enabled: true,
   matchMode: "any",
@@ -54,24 +60,33 @@ function userErrorsMessage(userErrors) {
   if (!(userErrors == null ? void 0 : userErrors.length)) return null;
   return userErrors.map((e) => e.message).join("; ");
 }
+function graphqlErrorsMessage(errors) {
+  if (!(errors == null ? void 0 : errors.length)) return null;
+  return errors.map((e) => e.message).join("; ");
+}
 async function graphql(admin, query, variables) {
   const response = await admin.graphql(query, variables ? { variables } : void 0);
   return await response.json();
 }
-async function resolveFunctionId(admin, titleIncludes) {
+async function resolveFunctionId(admin, titleIncludes, apiTypeIncludes) {
   var _a2;
   const result = await graphql(
     admin,
     `#graphql
       query ListShopifyFunctions {
         shopifyFunctions(first: 25) {
-          nodes { id title }
+          nodes { id title apiType }
         }
       }`
   );
-  const node = (_a2 = result.data) == null ? void 0 : _a2.shopifyFunctions.nodes.find(
-    (n) => n.title.includes(titleIncludes)
-  );
+  const gqlErr = graphqlErrorsMessage(result.errors);
+  if (gqlErr && !result.data) {
+    return null;
+  }
+  const nodes = ((_a2 = result.data) == null ? void 0 : _a2.shopifyFunctions.nodes) ?? [];
+  const node = nodes.find(
+    (n) => n.title.includes(titleIncludes) && (!apiTypeIncludes || n.apiType.toLowerCase().includes(apiTypeIncludes))
+  ) ?? nodes.find((n) => n.title.includes(titleIncludes));
   return (node == null ? void 0 : node.id) ?? null;
 }
 async function ensureDeliveryCustomization(admin) {
@@ -161,32 +176,157 @@ async function ensureDeliveryCustomization(admin) {
   }
   return { ok: false, message: "No se pudo crear la personalización de entrega." };
 }
-async function ensureShippingDiscount(admin) {
+function isShippingDiscountTitle(title) {
+  if (!title) return false;
+  const normalized = title.trim().toLowerCase();
+  return title === SHIPPING_DISCOUNT_TITLE || normalized.includes("entrega en tienda") && normalized.includes("shipping");
+}
+function isDuplicateDiscountTitleError(message) {
+  return /unique|already|taken|duplicate/i.test(message);
+}
+function parseExistingAppDiscount(id, discount) {
+  var _a2;
+  if (!discount || typeof discount !== "object" || !("title" in discount)) {
+    return null;
+  }
+  const parsed = discount;
+  if (!parsed.title) return null;
+  return {
+    id,
+    title: parsed.title,
+    status: parsed.status,
+    functionId: (_a2 = parsed.appDiscountType) == null ? void 0 : _a2.functionId
+  };
+}
+async function findExistingShippingDiscount(admin, functionId) {
   var _a2, _b;
+  const searchQuery = `title:${SHIPPING_DISCOUNT_TITLE}`;
+  const byTitle = await graphql(
+    admin,
+    `#graphql
+      query FindShippingDiscountByTitle($query: String!) {
+        discountNodes(first: 10, query: $query) {
+          nodes {
+            id
+            discount {
+              ... on DiscountAutomaticApp {
+                title
+                status
+                appDiscountType { functionId }
+              }
+            }
+          }
+        }
+      }`,
+    { query: searchQuery }
+  );
+  for (const node of ((_a2 = byTitle.data) == null ? void 0 : _a2.discountNodes.nodes) ?? []) {
+    const parsed = parseExistingAppDiscount(node.id, node.discount);
+    if (!parsed) continue;
+    if (isShippingDiscountTitle(parsed.title)) return parsed;
+    if (functionId && parsed.functionId === functionId) return parsed;
+  }
   const list2 = await graphql(
     admin,
     `#graphql
-      query ListAutomaticDiscounts {
-        automaticDiscountNodes(first: 25) {
+      query ListAppAutomaticDiscounts {
+        discountNodes(first: 50, query: "type:app") {
           nodes {
             id
-            automaticDiscount {
-              ... on DiscountAutomaticApp { title status }
+            discount {
+              ... on DiscountAutomaticApp {
+                title
+                status
+                appDiscountType { functionId }
+              }
             }
           }
         }
       }`
   );
-  const existing = (_a2 = list2.data) == null ? void 0 : _a2.automaticDiscountNodes.nodes.find(
-    (node) => node.automaticDiscount && "title" in node.automaticDiscount && node.automaticDiscount.title === SHIPPING_DISCOUNT_TITLE
+  for (const node of ((_b = list2.data) == null ? void 0 : _b.discountNodes.nodes) ?? []) {
+    const parsed = parseExistingAppDiscount(node.id, node.discount);
+    if (!parsed) continue;
+    if (isShippingDiscountTitle(parsed.title)) return parsed;
+    if (functionId && parsed.functionId === functionId) return parsed;
+  }
+  return null;
+}
+async function ensureShippingDiscountFunctionConfig(admin, discountId) {
+  await graphql(
+    admin,
+    `#graphql
+      mutation ConfigureShippingDiscountFunction($id: ID!, $input: DiscountAutomaticAppInput!) {
+        discountAutomaticAppUpdate(id: $id, automaticAppDiscount: $input) {
+          userErrors { field message }
+        }
+      }`,
+    {
+      id: discountId,
+      input: {
+        metafields: [
+          {
+            namespace: "$app",
+            key: "function-configuration",
+            type: "json",
+            value: DISCOUNT_FUNCTION_CONFIG_JSON
+          }
+        ]
+      }
+    }
   );
+}
+async function ensureShippingDiscountActive(admin, discountId) {
+  var _a2, _b;
+  const updated = await graphql(
+    admin,
+    `#graphql
+      mutation ReactivateShippingDiscount($id: ID!, $input: DiscountAutomaticAppInput!) {
+        discountAutomaticAppUpdate(id: $id, automaticAppDiscount: $input) {
+          automaticAppDiscount { title status }
+          userErrors { field message }
+        }
+      }`,
+    {
+      id: discountId,
+      input: {
+        startsAt: (/* @__PURE__ */ new Date()).toISOString(),
+        discountClasses: ["SHIPPING"]
+      }
+    }
+  );
+  const payload = (_a2 = updated.data) == null ? void 0 : _a2.discountAutomaticAppUpdate;
+  const err = userErrorsMessage(payload == null ? void 0 : payload.userErrors);
+  if (err) {
+    return {
+      ok: true,
+      message: "Descuento de envío ya existía en la tienda."
+    };
+  }
+  const status = (_b = payload == null ? void 0 : payload.automaticAppDiscount) == null ? void 0 : _b.status;
+  if (status === "ACTIVE" || status === "SCHEDULED") {
+    return { ok: true, message: "Descuento de envío reactivado." };
+  }
+  return { ok: true, message: "Descuento de envío ya configurado." };
+}
+async function ensureShippingDiscount(admin) {
+  var _a2, _b;
+  const functionId = await resolveFunctionId(
+    admin,
+    "Shipping Discount",
+    "shipping"
+  );
+  const existing = await findExistingShippingDiscount(admin, functionId);
   if (existing) {
+    await ensureShippingDiscountFunctionConfig(admin, existing.id);
+    if (existing.status === "EXPIRED") {
+      return ensureShippingDiscountActive(admin, existing.id);
+    }
     return {
       ok: true,
       message: "Descuento de envío ya configurado."
     };
   }
-  const functionId = await resolveFunctionId(admin, "Shipping Discount");
   if (!functionId) {
     return {
       ok: false,
@@ -206,13 +346,39 @@ async function ensureShippingDiscount(admin) {
       input: {
         title: SHIPPING_DISCOUNT_TITLE,
         functionId,
-        startsAt: (/* @__PURE__ */ new Date()).toISOString()
+        startsAt: (/* @__PURE__ */ new Date()).toISOString(),
+        discountClasses: ["SHIPPING"],
+        metafields: [
+          {
+            namespace: "$app",
+            key: "function-configuration",
+            type: "json",
+            value: DISCOUNT_FUNCTION_CONFIG_JSON
+          }
+        ]
       }
     }
   );
+  const gqlErr = graphqlErrorsMessage(created.errors);
+  if (gqlErr && !((_a2 = created.data) == null ? void 0 : _a2.discountAutomaticAppCreate)) {
+    return { ok: false, message: gqlErr };
+  }
   const payload = (_b = created.data) == null ? void 0 : _b.discountAutomaticAppCreate;
   const err = userErrorsMessage(payload == null ? void 0 : payload.userErrors);
   if (err) {
+    if (isDuplicateDiscountTitleError(err)) {
+      const duplicate = await findExistingShippingDiscount(admin, functionId);
+      if ((duplicate == null ? void 0 : duplicate.status) === "EXPIRED") {
+        return ensureShippingDiscountActive(admin, duplicate.id);
+      }
+      if (duplicate) {
+        await ensureShippingDiscountFunctionConfig(admin, duplicate.id);
+      }
+      return {
+        ok: true,
+        message: "Descuento de envío ya existía en la tienda."
+      };
+    }
     return { ok: false, message: err };
   }
   if (payload == null ? void 0 : payload.automaticAppDiscount) {
@@ -237,6 +403,10 @@ async function ensureMetafieldDefinition(admin) {
             description: "Ciudades, códigos postales, dirección de tienda y precios."
             type: "json"
             ownerType: SHOP
+            access: {
+              admin: MERCHANT_READ_WRITE
+              storefront: PUBLIC_READ
+            }
           }
         ) {
           createdDefinition { id namespace key }
@@ -869,8 +1039,16 @@ const app__index = UNSAFE_withComponentProps(function Index() {
             type: "strong",
             children: "Entrega en tienda — configuración"
           }), " ", "para cambiar ciudades, códigos postales y dirección de la tienda."]
+        }), /* @__PURE__ */ jsxs("s-list-item", {
+          children: ["En ", /* @__PURE__ */ jsx("s-text", {
+            type: "strong",
+            children: "Configuración → Checkout → Personalizar"
+          }), ", añade el bloque ", /* @__PURE__ */ jsx("s-text", {
+            type: "strong",
+            children: "Entrega en tienda — UI"
+          }), " ", "en la sección de envío (banner + cambio de dirección a tienda)."]
         }), /* @__PURE__ */ jsx("s-list-item", {
-          children: "Probar el checkout con una dirección de Madrid (p. ej. CP 28045)."
+          children: "Probar el checkout con una dirección de Madrid (p. ej. CP 28042) en incógnito."
         })]
       })
     })]
@@ -886,7 +1064,7 @@ const route8 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProper
   headers,
   loader
 }, Symbol.toStringTag, { value: "Module" }));
-const serverManifest = { "entry": { "module": "/assets/entry.client-BF-FzpIp.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js"], "css": [] }, "routes": { "root": { "id": "root", "parentId": void 0, "path": "", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": false, "module": "/assets/root-CC0ImHxS.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/webhooks.app.scopes_update": { "id": "routes/webhooks.app.scopes_update", "parentId": "root", "path": "webhooks/app/scopes_update", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": false, "hasErrorBoundary": false, "module": "/assets/webhooks.app.scopes_update-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/webhooks.app.uninstalled": { "id": "routes/webhooks.app.uninstalled", "parentId": "root", "path": "webhooks/app/uninstalled", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": false, "hasErrorBoundary": false, "module": "/assets/webhooks.app.uninstalled-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/auth.login": { "id": "routes/auth.login", "parentId": "root", "path": "auth/login", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": false, "module": "/assets/route-DELoIbZP.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js", "/assets/AppProxyProvider-DmoHTPZF.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/_index": { "id": "routes/_index", "parentId": "root", "path": void 0, "index": true, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": false, "module": "/assets/route-BKVlaaEk.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js"], "css": ["/assets/route-Xpdx9QZl.css"], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/auth.$": { "id": "routes/auth.$", "parentId": "root", "path": "auth/*", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": false, "hasErrorBoundary": false, "module": "/assets/auth._-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/app": { "id": "routes/app", "parentId": "root", "path": "app", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": true, "module": "/assets/app-DbKNTe2N.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js", "/assets/AppProxyProvider-DmoHTPZF.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/app.delivery-customization.$functionId.$id": { "id": "routes/app.delivery-customization.$functionId.$id", "parentId": "routes/app", "path": "delivery-customization/:functionId/:id", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": false, "module": "/assets/app.delivery-customization._functionId._id-C_m-dg56.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/app._index": { "id": "routes/app._index", "parentId": "routes/app", "path": void 0, "index": true, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": false, "module": "/assets/app._index-UXNuJa6y.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 } }, "url": "/assets/manifest-55e3cbe9.js", "version": "55e3cbe9", "sri": void 0 };
+const serverManifest = { "entry": { "module": "/assets/entry.client-BF-FzpIp.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js"], "css": [] }, "routes": { "root": { "id": "root", "parentId": void 0, "path": "", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": false, "module": "/assets/root-CC0ImHxS.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/webhooks.app.scopes_update": { "id": "routes/webhooks.app.scopes_update", "parentId": "root", "path": "webhooks/app/scopes_update", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": false, "hasErrorBoundary": false, "module": "/assets/webhooks.app.scopes_update-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/webhooks.app.uninstalled": { "id": "routes/webhooks.app.uninstalled", "parentId": "root", "path": "webhooks/app/uninstalled", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": false, "hasErrorBoundary": false, "module": "/assets/webhooks.app.uninstalled-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/auth.login": { "id": "routes/auth.login", "parentId": "root", "path": "auth/login", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": false, "module": "/assets/route-DELoIbZP.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js", "/assets/AppProxyProvider-DmoHTPZF.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/_index": { "id": "routes/_index", "parentId": "root", "path": void 0, "index": true, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": false, "module": "/assets/route-BKVlaaEk.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js"], "css": ["/assets/route-Xpdx9QZl.css"], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/auth.$": { "id": "routes/auth.$", "parentId": "root", "path": "auth/*", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": false, "hasErrorBoundary": false, "module": "/assets/auth._-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/app": { "id": "routes/app", "parentId": "root", "path": "app", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": true, "module": "/assets/app-DbKNTe2N.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js", "/assets/AppProxyProvider-DmoHTPZF.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/app.delivery-customization.$functionId.$id": { "id": "routes/app.delivery-customization.$functionId.$id", "parentId": "routes/app", "path": "delivery-customization/:functionId/:id", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": false, "module": "/assets/app.delivery-customization._functionId._id-C_m-dg56.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/app._index": { "id": "routes/app._index", "parentId": "routes/app", "path": void 0, "index": true, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": false, "module": "/assets/app._index-D8MH1nZS.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 } }, "url": "/assets/manifest-ed4fae14.js", "version": "ed4fae14", "sri": void 0 };
 const assetsBuildDirectory = "build/client";
 const basename = "/";
 const future = { "unstable_optimizeDeps": false, "v8_passThroughRequests": false, "unstable_trailingSlashAwareDataRequests": false, "unstable_previewServerPrerendering": false, "v8_middleware": false, "v8_splitRouteModules": false, "v8_viteEnvironmentApi": false };

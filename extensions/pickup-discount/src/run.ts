@@ -1,4 +1,5 @@
 import type { RunInput, FunctionRunResult } from "../generated/api";
+import { DeliveryMethod } from "../generated/api";
 import type { GeoMatchConfig, ZipRange } from "./geo_eligibility";
 import {
   inCountry,
@@ -6,6 +7,7 @@ import {
   pickAddressForGeo,
   resolveCustomerShippingAddress,
 } from "./geo_eligibility";
+import { matchesEntregaTiendaShippingRate } from "./delivery_option_match";
 
 /** Si no hay precio válido ni en descuento ni en JSON tienda. */
 const DEFAULT_DISCOUNT_PRICE = 4.99;
@@ -19,6 +21,7 @@ type DiscountConfig = {
 
 type ShopConfig = {
   enabled?: boolean;
+  displayName?: string;
   pickupDeliveryOptionMatchers?: string[];
   matchMode?: "any" | "all";
   cities?: string[];
@@ -83,8 +86,14 @@ export function run(input: RunInput): FunctionRunResult {
   const targetPrice = computeTargetPrice(pricing, subtotal);
 
   const pickupOptions = input.cart.deliveryGroups.flatMap((group) =>
-    group.deliveryOptions.filter((opt) =>
-      isPickupOption(opt.title, matchers, shopCfg?.displayName),
+    group.deliveryOptions.filter(
+      (opt) =>
+        opt.deliveryMethodType === DeliveryMethod.Shipping &&
+        matchesEntregaTiendaShippingRate(
+          opt.title,
+          matchers,
+          shopCfg?.displayName,
+        ),
     ),
   );
 
@@ -233,29 +242,6 @@ function computeTargetPrice(
     return 0;
   }
   return defaultPx;
-}
-
-function isPickupOption(
-  title: string | undefined | null,
-  matchers: string[],
-  displayName?: string | null,
-): boolean {
-  if (!title?.trim()) return false;
-  const t = normalize(title);
-  if (displayName?.trim()) {
-    const dn = normalize(displayName);
-    if (dn && (t === dn || t.includes(dn))) return true;
-  }
-  if (!matchers?.length) return false;
-  return matchers.some((m) => t.includes(normalize(m)));
-}
-
-function normalize(s: string): string {
-  return s
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .toLowerCase();
 }
 
 function shopHasGeoRules(cfg: ShopConfig): boolean {

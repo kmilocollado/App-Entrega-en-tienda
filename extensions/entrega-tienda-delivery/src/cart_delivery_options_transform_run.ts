@@ -3,12 +3,14 @@ import type {
   CartDeliveryOptionsTransformRunResult,
   Operation,
 } from "../generated/api";
+import { DeliveryMethod } from "../generated/api";
 import {
   inCountry,
   isEligibleForGeo,
   pickAddressForGeo,
   resolveAddressForGeoRule,
 } from "./geo_eligibility";
+import { matchesEntregaTiendaShippingRate } from "./delivery_option_match";
 
 type ZipRange = { from: string; to: string };
 
@@ -44,7 +46,17 @@ export function cartDeliveryOptionsTransformRun(
 
   for (const group of groups) {
     for (const opt of group.deliveryOptions) {
-      if (!isPickupOption(opt.title, cfg.pickupDeliveryOptionMatchers)) {
+      // Tarifa manual de envío; no pickup points (Sendcloud PICKUP_POINT, etc.).
+      if (opt.deliveryMethodType !== DeliveryMethod.Shipping) {
+        continue;
+      }
+      if (
+        !matchesEntregaTiendaShippingRate(
+          opt.title,
+          cfg.pickupDeliveryOptionMatchers,
+          cfg.displayName,
+        )
+      ) {
         continue;
       }
 
@@ -144,21 +156,4 @@ function zipInNumericRange(zipDigits: string, from: string, to: string): boolean
     return z >= parseInt(a, 10) && z <= parseInt(b, 10);
   }
   return zipDigits >= a && zipDigits <= b;
-}
-
-function isPickupOption(
-  title: string | undefined | null,
-  matchers: string[],
-): boolean {
-  if (!title || !matchers?.length) return false;
-  const t = normalize(title);
-  return matchers.some((m) => t.includes(normalize(m)));
-}
-
-function normalize(s: string): string {
-  return s
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .toLowerCase();
 }
