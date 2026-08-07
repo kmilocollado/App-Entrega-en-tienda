@@ -390,28 +390,38 @@ async function ensureShippingDiscount(admin) {
   }
   return { ok: false, message: "No se pudo crear el descuento de envío." };
 }
-async function shopMetafieldDefinitionExists(admin) {
+async function findShopEntregaMetafieldDefinition(admin) {
   var _a2, _b;
   const result = await graphql(
     admin,
     `#graphql
-      query ShopEntregaMetafieldDefinition {
-        metafieldDefinition(
-          identifier: {
-            namespace: "${SHOP_METAFIELD_NAMESPACE}"
-            key: "${SHOP_METAFIELD_KEY}"
-            ownerType: SHOP
-          }
+      query ShopEntregaMetafieldDefinitions {
+        metafieldDefinitions(
+          first: 10
+          ownerType: SHOP
+          query: "key:${SHOP_METAFIELD_KEY}"
         ) {
-          id
+          nodes { id namespace key }
         }
       }`
   );
-  return Boolean((_b = (_a2 = result.data) == null ? void 0 : _a2.metafieldDefinition) == null ? void 0 : _b.id);
+  const nodes = ((_b = (_a2 = result.data) == null ? void 0 : _a2.metafieldDefinitions) == null ? void 0 : _b.nodes) ?? [];
+  return nodes.find(
+    (n) => n.key === SHOP_METAFIELD_KEY && (n.namespace === SHOP_METAFIELD_NAMESPACE || n.namespace.startsWith("app--"))
+  ) ?? nodes.find((n) => n.key === SHOP_METAFIELD_KEY) ?? null;
+}
+function isBenignMetafieldDefinitionError(userErrors) {
+  if (!(userErrors == null ? void 0 : userErrors.length)) return false;
+  return userErrors.every(
+    (e) => /taken|already|exists|declarative|read.only|read-only|not permitted|access control|public_read_write/i.test(
+      `${e.message} ${e.code ?? ""}`
+    )
+  );
 }
 async function ensureMetafieldDefinition(admin) {
   var _a2, _b;
-  if (await shopMetafieldDefinitionExists(admin)) {
+  const existing = await findShopEntregaMetafieldDefinition(admin);
+  if (existing && (existing.namespace === SHOP_METAFIELD_NAMESPACE || existing.namespace.startsWith("app--"))) {
     return {
       ok: true,
       message: "Definición del metacampo de tienda ya existía."
@@ -429,10 +439,6 @@ async function ensureMetafieldDefinition(admin) {
             description: "Ciudades, códigos postales, dirección de tienda y precios."
             type: "json"
             ownerType: SHOP
-            access: {
-              admin: MERCHANT_READ_WRITE
-              storefront: PUBLIC_READ
-            }
           }
         ) {
           createdDefinition { id namespace key }
@@ -440,7 +446,8 @@ async function ensureMetafieldDefinition(admin) {
         }
       }`
   );
-  if (await shopMetafieldDefinitionExists(admin)) {
+  const after = await findShopEntregaMetafieldDefinition(admin);
+  if (after && (after.namespace === SHOP_METAFIELD_NAMESPACE || after.namespace.startsWith("app--"))) {
     const payload2 = (_a2 = created.data) == null ? void 0 : _a2.metafieldDefinitionCreate;
     return {
       ok: true,
@@ -448,6 +455,12 @@ async function ensureMetafieldDefinition(admin) {
     };
   }
   const payload = (_b = created.data) == null ? void 0 : _b.metafieldDefinitionCreate;
+  if (isBenignMetafieldDefinitionError(payload == null ? void 0 : payload.userErrors)) {
+    return {
+      ok: true,
+      message: "Definición del metacampo gestionada por Shopify (despliegue de la app)."
+    };
+  }
   const err = userErrorsMessage(payload == null ? void 0 : payload.userErrors) ?? graphqlErrorsMessage(created.errors);
   return {
     ok: false,
