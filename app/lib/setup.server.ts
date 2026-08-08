@@ -15,7 +15,7 @@ const DISCOUNT_FUNCTION_CONFIG_JSON = JSON.stringify({
 });
 
 /** Visible en Admin para confirmar que Render sirve el build correcto. */
-export const SETUP_BUILD_ID = "2026-03-09-v7";
+export const SETUP_BUILD_ID = "2026-03-09-v8";
 
 export const DEFAULT_ENTREGA_CONFIG = {
   enabled: true,
@@ -655,18 +655,54 @@ async function createShopEntregaMetafieldDefinition(
   };
 }
 
+async function pinShopEntregaMetafieldDefinition(
+  admin: AdminApiContext,
+  definitionId: string,
+): Promise<string | null> {
+  const pinned = await graphql<{
+    metafieldDefinitionPin: {
+      pinnedDefinition: { id: string } | null;
+      userErrors: Array<{ message: string }>;
+    };
+  }>(
+    admin,
+    `#graphql
+      mutation PinShopEntafieldDefinition($definitionId: ID!) {
+        metafieldDefinitionPin(definitionId: $definitionId) {
+          pinnedDefinition { id }
+          userErrors { field message }
+        }
+      }`,
+    { definitionId },
+  );
+
+  return userErrorsMessage(pinned.data?.metafieldDefinitionPin?.userErrors);
+}
+
 async function ensureMetafieldDefinition(
   admin: AdminApiContext,
 ): Promise<SetupStepResult> {
-  const existing = await findShopEntregaMetafieldDefinition(admin);
-  if (existing) {
-    return {
-      ok: true,
-      message: `Definición del metacampo lista (${existing.namespace}).`,
-    };
+  let existing = await findShopEntregaMetafieldDefinition(admin);
+  if (!existing) {
+    const created = await createShopEntregaMetafieldDefinition(admin);
+    if (!created.ok) return created;
+    existing = await findShopEntregaMetafieldDefinition(admin);
+    if (!existing) {
+      return {
+        ok: false,
+        message:
+          "Definición no encontrada tras crearla. Ejecuta npm run deploy y repite.",
+      };
+    }
   }
 
-  return createShopEntregaMetafieldDefinition(admin);
+  const pinErr = await pinShopEntregaMetafieldDefinition(admin, existing.id);
+  const pinNote = pinErr ? "" : " Fijada en Admin para que aparezca en la lista.";
+
+  return {
+    ok: true,
+    message: `Definición lista (${existing.namespace}). Nombre en Admin: «Entrega en tienda — configuración».${pinNote}`,
+  };
 }
 
 async function readShopEntregaMetafieldValue(

@@ -33,4 +33,5 @@ scopes = "read_locations,read_orders,read_shipping,write_orders,read_delivery_cu
 name = "Entrega en tienda — configuración"
 description = "Ciudades, códigos postales, dirección de tienda y precios."
 type = "json"
+access.admin = "merchant_read_write"
 access.storefront = "public_read"

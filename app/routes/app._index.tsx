@@ -125,8 +125,14 @@ export default function Index() {
           </s-list-item>
           <s-list-item>
             En <s-text type="strong">Datos personalizados → Tienda</s-text>,
-            editar <s-text type="strong">Entrega en tienda — configuración</s-text>{" "}
-            para cambiar ciudades, códigos postales y dirección de la tienda.
+            busca <s-text type="strong">Entrega en tienda — configuración</s-text>.
+            Si ves &quot;8 definiciones&quot; pero solo 6 en pantalla, abre{" "}
+            <s-text type="strong">Mostrar no fijados</s-text> o filtra por la app{" "}
+            <s-text type="strong">entrega-tienda</s-text>.
+          </s-list-item>
+          <s-list-item>
+            Para editar ciudades, CP y dirección de tienda usa ese metacampo JSON
+            o pulsa <s-text type="strong">Repetir configuración</s-text> en esta app.
           </s-list-item>
           <s-list-item>
             Matcher del metacampo: solo{" "}
