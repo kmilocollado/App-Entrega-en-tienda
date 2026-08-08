@@ -29,7 +29,7 @@ const DISCOUNT_FUNCTION_CONFIG_JSON = JSON.stringify({
   freeShippingThresholdEnabled: true,
   freeOverSubtotal: 100
 });
-const SETUP_BUILD_ID = "2026-03-09-v6";
+const SETUP_BUILD_ID = "2026-03-09-v7";
 const DEFAULT_ENTREGA_CONFIG = {
   enabled: true,
   matchMode: "any",
@@ -428,14 +428,29 @@ async function ensureShippingDiscount(admin) {
   }
   return { ok: false, message: "No se pudo crear el descuento de envío." };
 }
-async function ensureMetafieldDefinition(_admin) {
-  return {
-    ok: true,
-    message: `Lista (${SETUP_BUILD_ID}). La definición $app se registra al desplegar la app en Partners (npm run deploy).`
-  };
+async function findShopEntregaMetafieldDefinition(admin) {
+  var _a2, _b;
+  const result = await graphql(
+    admin,
+    `#graphql
+      query ShopEntregaMetafieldDefinitions {
+        metafieldDefinitions(
+          first: 10
+          ownerType: SHOP
+          query: "key:${SHOP_METAFIELD_KEY}"
+        ) {
+          nodes { id namespace key }
+        }
+      }`
+  );
+  const nodes = ((_b = (_a2 = result.data) == null ? void 0 : _a2.metafieldDefinitions) == null ? void 0 : _b.nodes) ?? [];
+  return nodes.find(
+    (n) => n.key === SHOP_METAFIELD_KEY && (n.namespace === SHOP_METAFIELD_NAMESPACE || n.namespace.startsWith("app--"))
+  ) ?? null;
 }
-async function tryCreateAppShopMetafieldDefinition(admin) {
-  await graphql(
+async function createShopEntregaMetafieldDefinition(admin) {
+  var _a2, _b, _c;
+  const created = await graphql(
     admin,
     `#graphql
       mutation CreateShopMetafieldDefinition {
@@ -449,11 +464,66 @@ async function tryCreateAppShopMetafieldDefinition(admin) {
             ownerType: SHOP
           }
         ) {
-          createdDefinition { id }
+          createdDefinition { id namespace }
           userErrors { field message code }
         }
       }`
   );
+  const after = await findShopEntregaMetafieldDefinition(admin);
+  if (after) {
+    return {
+      ok: true,
+      message: ((_b = (_a2 = created.data) == null ? void 0 : _a2.metafieldDefinitionCreate) == null ? void 0 : _b.createdDefinition) ? `Definición creada (${after.namespace}).` : `Definición ya existía (${after.namespace}).`
+    };
+  }
+  const payload = (_c = created.data) == null ? void 0 : _c.metafieldDefinitionCreate;
+  const err = userErrorsMessage(payload == null ? void 0 : payload.userErrors) ?? graphqlErrorsMessage(created.errors);
+  if (err && /taken|already|exists|declarative|read.only|read-only/i.test(err)) {
+    return {
+      ok: false,
+      message: `Definición no disponible todavía. Ejecuta npm run deploy y repite. Detalle: ${err}`
+    };
+  }
+  return {
+    ok: false,
+    message: err ?? "No se pudo crear la definición del metacampo de tienda."
+  };
+}
+async function ensureMetafieldDefinition(admin) {
+  const existing = await findShopEntregaMetafieldDefinition(admin);
+  if (existing) {
+    return {
+      ok: true,
+      message: `Definición del metacampo lista (${existing.namespace}).`
+    };
+  }
+  return createShopEntregaMetafieldDefinition(admin);
+}
+async function readShopEntregaMetafieldValue(admin) {
+  var _a2;
+  const shopQuery = await graphql(
+    admin,
+    `#graphql
+      query ShopEntregaConfig {
+        shop {
+          id
+          appConfig: metafield(namespace: "${SHOP_METAFIELD_NAMESPACE}", key: "${SHOP_METAFIELD_KEY}") {
+            id
+            jsonValue
+          }
+          legacyConfig: metafield(namespace: "${LEGACY_SHOP_METAFIELD_NAMESPACE}", key: "${SHOP_METAFIELD_KEY}") {
+            id
+            jsonValue
+          }
+        }
+      }`
+  );
+  const shop = (_a2 = shopQuery.data) == null ? void 0 : _a2.shop;
+  return {
+    shopId: (shop == null ? void 0 : shop.id) ?? null,
+    appConfig: (shop == null ? void 0 : shop.appConfig) ?? null,
+    legacyConfig: (shop == null ? void 0 : shop.legacyConfig) ?? null
+  };
 }
 function normalizeMatcherToken(s) {
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
@@ -478,30 +548,15 @@ function repairEntregaConfigJson(raw) {
   };
 }
 async function ensureShopMetafieldValue(admin) {
-  var _a2, _b, _c, _d, _e, _f;
-  const shopQuery = await graphql(
-    admin,
-    `#graphql
-      query ShopEntregaConfig {
-        shop {
-          id
-          appConfig: metafield(namespace: "${SHOP_METAFIELD_NAMESPACE}", key: "${SHOP_METAFIELD_KEY}") {
-            id
-            jsonValue
-          }
-          legacyConfig: metafield(namespace: "${LEGACY_SHOP_METAFIELD_NAMESPACE}", key: "${SHOP_METAFIELD_KEY}") {
-            id
-            jsonValue
-          }
-        }
-      }`
-  );
-  const shopId = (_a2 = shopQuery.data) == null ? void 0 : _a2.shop.id;
+  var _a2, _b, _c, _d;
+  const def = await ensureMetafieldDefinition(admin);
+  if (!def.ok) {
+    return def;
+  }
+  const { shopId, appConfig: existing, legacyConfig: legacy } = await readShopEntregaMetafieldValue(admin);
   if (!shopId) {
     return { ok: false, message: "No se pudo leer el ID de la tienda." };
   }
-  const existing = (_b = shopQuery.data) == null ? void 0 : _b.shop.appConfig;
-  const legacy = (_c = shopQuery.data) == null ? void 0 : _c.shop.legacyConfig;
   if (existing == null ? void 0 : existing.id) {
     const raw = existing.jsonValue != null && typeof existing.jsonValue === "object" && !Array.isArray(existing.jsonValue) ? existing.jsonValue : null;
     const repaired = raw ? repairEntregaConfigJson(raw) : null;
@@ -527,7 +582,7 @@ async function ensureShopMetafieldValue(admin) {
           ]
         }
       );
-      const payload2 = (_d = set2.data) == null ? void 0 : _d.metafieldsSet;
+      const payload2 = (_a2 = set2.data) == null ? void 0 : _a2.metafieldsSet;
       const err2 = userErrorsMessage(payload2 == null ? void 0 : payload2.userErrors);
       if (err2) {
         return {
@@ -547,7 +602,6 @@ async function ensureShopMetafieldValue(admin) {
   }
   const legacyRaw = (legacy == null ? void 0 : legacy.jsonValue) != null && typeof legacy.jsonValue === "object" && !Array.isArray(legacy.jsonValue) ? legacy.jsonValue : null;
   const initialValue = legacyRaw ? repairEntregaConfigJson(legacyRaw) ?? legacyRaw : DEFAULT_ENTREGA_CONFIG;
-  await tryCreateAppShopMetafieldDefinition(admin);
   const set = await graphql(
     admin,
     `#graphql
@@ -569,7 +623,7 @@ async function ensureShopMetafieldValue(admin) {
       ]
     }
   );
-  const payload = (_e = set.data) == null ? void 0 : _e.metafieldsSet;
+  const payload = (_b = set.data) == null ? void 0 : _b.metafieldsSet;
   const err = userErrorsMessage(payload == null ? void 0 : payload.userErrors);
   if (err) {
     if (/definition|access control|not permitted/i.test(err)) {
@@ -580,16 +634,23 @@ async function ensureShopMetafieldValue(admin) {
     }
     return { ok: false, message: err };
   }
-  if ((_f = payload == null ? void 0 : payload.metafields) == null ? void 0 : _f.length) {
+  if ((_c = payload == null ? void 0 : payload.metafields) == null ? void 0 : _c.length) {
+    const verify = await readShopEntregaMetafieldValue(admin);
+    if ((_d = verify.appConfig) == null ? void 0 : _d.id) {
+      return {
+        ok: true,
+        message: legacyRaw ? "Configuración migrada del metacampo legacy (custom) a $app." : "Configuración inicial de tienda cargada."
+      };
+    }
     return {
-      ok: true,
-      message: legacyRaw ? "Configuración migrada del metacampo legacy (custom) a $app." : "Configuración inicial de tienda cargada."
+      ok: false,
+      message: "metafieldsSet no devolvió error pero el valor no aparece en la tienda. Repite la configuración."
     };
   }
   return { ok: false, message: "No se pudo guardar la configuración de tienda." };
 }
 async function runEntregaTiendaSetup(admin) {
-  const metafieldDefinition = await ensureMetafieldDefinition();
+  const metafieldDefinition = await ensureMetafieldDefinition(admin);
   const shopMetafield = await ensureShopMetafieldValue(admin);
   const deliveryCustomization = await ensureDeliveryCustomization(admin);
   const shippingDiscount = await ensureShippingDiscount(admin);
