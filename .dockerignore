@@ -1,0 +1,8 @@
+node_modules
+**/node_modules
+.git
+.cursor
+*.md
+!README.md
+extensions/**/dist
+.agent-transcripts

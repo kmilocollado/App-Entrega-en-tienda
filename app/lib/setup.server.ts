@@ -15,7 +15,7 @@ const DISCOUNT_FUNCTION_CONFIG_JSON = JSON.stringify({
 });
 
 /** Visible en Admin para confirmar que Render sirve el build correcto. */
-export const SETUP_BUILD_ID = "2026-03-09-v5";
+export const SETUP_BUILD_ID = "2026-03-09-v6";
 
 export const DEFAULT_ENTREGA_CONFIG = {
   enabled: true,

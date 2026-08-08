@@ -1,17 +1,26 @@
-# Render Blueprint — plan Free (sin tarjeta)
-# https://render.com/docs/blueprint-spec
-#
-# Root Directory en Render: dejar vacío (raíz del repo). No uses apps/entrega-tienda.
+# Render Blueprint — debe coincidir con el servicio en dashboard:
+# https://dashboard.render.com/web/srv-d9qd1en10e5c739ei6qg
+# URL: https://app-entrega-en-tienda.onrender.com
 
 services:
   - type: web
-    name: entrega-tienda
+    name: app-entrega-en-tienda
     runtime: docker
     plan: free
-    region: frankfurt
+    region: oregon
     dockerfilePath: ./Dockerfile
-    healthCheckPath: /
+    healthCheckPath: /api/setup-version
     autoDeploy: true
+    branch: main
+    buildFilter:
+      paths:
+        - app/**
+        - build/**
+        - prisma/**
+        - package.json
+        - package-lock.json
+        - Dockerfile
+        - .dockerignore
     envVars:
       - key: NODE_ENV
         value: production
@@ -27,3 +36,5 @@ services:
         sync: false
       - key: SHOPIFY_APP_URL
         value: https://app-entrega-en-tienda.onrender.com
+      - key: SETUP_BUILD_ID
+        value: 2026-03-09-v6

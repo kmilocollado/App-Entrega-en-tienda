@@ -29,7 +29,7 @@ const DISCOUNT_FUNCTION_CONFIG_JSON = JSON.stringify({
   freeShippingThresholdEnabled: true,
   freeOverSubtotal: 100
 });
-const SETUP_BUILD_ID = "2026-03-09-v5";
+const SETUP_BUILD_ID = "2026-03-09-v6";
 const DEFAULT_ENTREGA_CONFIG = {
   enabled: true,
   matchMode: "any",
