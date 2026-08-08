@@ -107,6 +107,40 @@ async function resolveFunctionId(
   return node?.id ?? null;
 }
 
+function matchesDeliveryCustomizationTitle(title: string): boolean {
+  const normalized = title.trim().toLowerCase();
+  return (
+    title === DELIVERY_CUSTOMIZATION_TITLE ||
+    (normalized.includes("entrega en tienda") &&
+      normalized.includes("delivery customization"))
+  );
+}
+
+async function deleteDeliveryCustomization(
+  admin: AdminApiContext,
+  id: string,
+): Promise<string | null> {
+  const deleted = await graphql<{
+    deliveryCustomizationDelete: {
+      deletedId: string | null;
+      userErrors: Array<{ message: string }>;
+    };
+  }>(
+    admin,
+    `#graphql
+      mutation DeleteDeliveryCustomization($id: ID!) {
+        deliveryCustomizationDelete(id: $id) {
+          deletedId
+          userErrors { field message }
+        }
+      }`,
+    { id },
+  );
+
+  const payload = deleted.data?.deliveryCustomizationDelete;
+  return userErrorsMessage(payload?.userErrors);
+}
+
 async function ensureDeliveryCustomization(
   admin: AdminApiContext,
 ): Promise<SetupStepResult> {
@@ -118,19 +152,43 @@ async function ensureDeliveryCustomization(
     admin,
     `#graphql
       query ListDeliveryCustomizations {
-        deliveryCustomizations(first: 20) {
+        deliveryCustomizations(first: 50) {
           nodes { id title enabled }
         }
       }`,
   );
 
-  const existing = list.data?.deliveryCustomizations.nodes.find(
-    (node) => node.title === DELIVERY_CUSTOMIZATION_TITLE,
-  );
+  let matches =
+    list.data?.deliveryCustomizations.nodes.filter((node) =>
+      matchesDeliveryCustomizationTitle(node.title),
+    ) ?? [];
+
+  let deduped = false;
+
+  if (matches.length > 1) {
+    deduped = true;
+    const keeper = matches.find((node) => node.enabled) ?? matches[0];
+    for (const dup of matches) {
+      if (dup.id === keeper.id) continue;
+      const deleteErr = await deleteDeliveryCustomization(admin, dup.id);
+      if (deleteErr) {
+        return {
+          ok: false,
+          message: `No se pudo eliminar personalización duplicada: ${deleteErr}`,
+        };
+      }
+    }
+    matches = [keeper];
+  }
+
+  const existing = matches[0];
+
   if (existing?.enabled) {
     return {
       ok: true,
-      message: "Personalización de entrega ya activa.",
+      message: deduped
+        ? "Personalización de entrega activa (duplicados eliminados)."
+        : "Personalización de entrega ya activa.",
     };
   }
 
@@ -503,7 +561,7 @@ async function ensureShippingDiscount(
   return { ok: false, message: "No se pudo crear el descuento de envío." };
 }
 
-async function findShopEntregaMetafieldDefinition(
+async function findAppShopEntregaMetafieldDefinition(
   admin: AdminApiContext,
 ): Promise<{ id: string; namespace: string; key: string } | null> {
   const result = await graphql<{
@@ -531,93 +589,29 @@ async function findShopEntregaMetafieldDefinition(
         n.key === SHOP_METAFIELD_KEY &&
         (n.namespace === SHOP_METAFIELD_NAMESPACE ||
           n.namespace.startsWith("app--")),
-    ) ??
-    nodes.find((n) => n.key === SHOP_METAFIELD_KEY) ??
-    null
+    ) ?? null
   );
 }
 
-function isBenignMetafieldDefinitionError(
-  userErrors: Array<{ message: string; code?: string }> | null | undefined,
-): boolean {
-  if (!userErrors?.length) return false;
-  return userErrors.every((e) =>
-    /taken|already|exists|declarative|read.only|read-only|not permitted|access control|public_read_write/i.test(
-      `${e.message} ${e.code ?? ""}`,
-    ),
-  );
-}
-
+/**
+ * La definición $app se registra con `npm run deploy` (TOML declarativo).
+ * Crearla por API provoca errores de access control en metacampos SHOP.
+ */
 async function ensureMetafieldDefinition(
   admin: AdminApiContext,
 ): Promise<SetupStepResult> {
-  const existing = await findShopEntregaMetafieldDefinition(admin);
-  if (
-    existing &&
-    (existing.namespace === SHOP_METAFIELD_NAMESPACE ||
-      existing.namespace.startsWith("app--"))
-  ) {
+  const appDef = await findAppShopEntregaMetafieldDefinition(admin);
+  if (appDef) {
     return {
       ok: true,
-      message: "Definición del metacampo de tienda ya existía.",
+      message: `Definición del metacampo de tienda lista (${appDef.namespace}).`,
     };
   }
 
-  const created = await graphql<{
-    metafieldDefinitionCreate: {
-      createdDefinition: { id: string; key: string } | null;
-      userErrors: Array<{ message: string; code?: string }>;
-    };
-  }>(
-    admin,
-    `#graphql
-      mutation CreateShopMetafieldDefinition {
-        metafieldDefinitionCreate(
-          definition: {
-            name: "Entrega en tienda — configuración"
-            namespace: "${SHOP_METAFIELD_NAMESPACE}"
-            key: "${SHOP_METAFIELD_KEY}"
-            description: "Ciudades, códigos postales, dirección de tienda y precios."
-            type: "json"
-            ownerType: SHOP
-          }
-        ) {
-          createdDefinition { id namespace key }
-          userErrors { field message code }
-        }
-      }`,
-  );
-
-  const after = await findShopEntregaMetafieldDefinition(admin);
-  if (
-    after &&
-    (after.namespace === SHOP_METAFIELD_NAMESPACE ||
-      after.namespace.startsWith("app--"))
-  ) {
-    const payload = created.data?.metafieldDefinitionCreate;
-    return {
-      ok: true,
-      message: payload?.createdDefinition
-        ? "Definición del metacampo de tienda creada."
-        : "Definición del metacampo de tienda ya existía.",
-    };
-  }
-
-  const payload = created.data?.metafieldDefinitionCreate;
-  if (isBenignMetafieldDefinitionError(payload?.userErrors)) {
-    return {
-      ok: true,
-      message:
-        "Definición del metacampo gestionada por Shopify (despliegue de la app).",
-    };
-  }
-
-  const err =
-    userErrorsMessage(payload?.userErrors) ??
-    graphqlErrorsMessage(created.errors);
   return {
-    ok: false,
-    message: err ?? "No se pudo crear la definición del metacampo de tienda.",
+    ok: true,
+    message:
+      "Definición $app pendiente de deploy. Ejecuta npm run deploy en la app; el valor de configuración se intentará guardar en el siguiente paso.",
   };
 }
 
@@ -785,6 +779,13 @@ async function ensureShopMetafieldValue(
   const payload = set.data?.metafieldsSet;
   const err = userErrorsMessage(payload?.userErrors);
   if (err) {
+    if (/definition|access control|not permitted/i.test(err)) {
+      return {
+        ok: false,
+        message:
+          "Falta la definición del metacampo $app. Ejecuta npm run deploy en la app y repite la configuración.",
+      };
+    }
     return { ok: false, message: err };
   }
   if (payload?.metafields?.length) {

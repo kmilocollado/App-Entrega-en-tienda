@@ -90,24 +90,61 @@ async function resolveFunctionId(admin, titleIncludes, apiTypeIncludes) {
   ) ?? nodes.find((n) => n.title.includes(titleIncludes));
   return (node == null ? void 0 : node.id) ?? null;
 }
+function matchesDeliveryCustomizationTitle(title) {
+  const normalized = title.trim().toLowerCase();
+  return title === DELIVERY_CUSTOMIZATION_TITLE || normalized.includes("entrega en tienda") && normalized.includes("delivery customization");
+}
+async function deleteDeliveryCustomization(admin, id) {
+  var _a2;
+  const deleted = await graphql(
+    admin,
+    `#graphql
+      mutation DeleteDeliveryCustomization($id: ID!) {
+        deliveryCustomizationDelete(id: $id) {
+          deletedId
+          userErrors { field message }
+        }
+      }`,
+    { id }
+  );
+  const payload = (_a2 = deleted.data) == null ? void 0 : _a2.deliveryCustomizationDelete;
+  return userErrorsMessage(payload == null ? void 0 : payload.userErrors);
+}
 async function ensureDeliveryCustomization(admin) {
   var _a2, _b, _c, _d;
   const list2 = await graphql(
     admin,
     `#graphql
       query ListDeliveryCustomizations {
-        deliveryCustomizations(first: 20) {
+        deliveryCustomizations(first: 50) {
           nodes { id title enabled }
         }
       }`
   );
-  const existing = (_a2 = list2.data) == null ? void 0 : _a2.deliveryCustomizations.nodes.find(
-    (node) => node.title === DELIVERY_CUSTOMIZATION_TITLE
-  );
+  let matches = ((_a2 = list2.data) == null ? void 0 : _a2.deliveryCustomizations.nodes.filter(
+    (node) => matchesDeliveryCustomizationTitle(node.title)
+  )) ?? [];
+  let deduped = false;
+  if (matches.length > 1) {
+    deduped = true;
+    const keeper = matches.find((node) => node.enabled) ?? matches[0];
+    for (const dup of matches) {
+      if (dup.id === keeper.id) continue;
+      const deleteErr = await deleteDeliveryCustomization(admin, dup.id);
+      if (deleteErr) {
+        return {
+          ok: false,
+          message: `No se pudo eliminar personalización duplicada: ${deleteErr}`
+        };
+      }
+    }
+    matches = [keeper];
+  }
+  const existing = matches[0];
   if (existing == null ? void 0 : existing.enabled) {
     return {
       ok: true,
-      message: "Personalización de entrega ya activa."
+      message: deduped ? "Personalización de entrega activa (duplicados eliminados)." : "Personalización de entrega ya activa."
     };
   }
   if (existing && !existing.enabled) {
@@ -390,7 +427,7 @@ async function ensureShippingDiscount(admin) {
   }
   return { ok: false, message: "No se pudo crear el descuento de envío." };
 }
-async function findShopEntregaMetafieldDefinition(admin) {
+async function findAppShopEntregaMetafieldDefinition(admin) {
   var _a2, _b;
   const result = await graphql(
     admin,
@@ -408,63 +445,19 @@ async function findShopEntregaMetafieldDefinition(admin) {
   const nodes = ((_b = (_a2 = result.data) == null ? void 0 : _a2.metafieldDefinitions) == null ? void 0 : _b.nodes) ?? [];
   return nodes.find(
     (n) => n.key === SHOP_METAFIELD_KEY && (n.namespace === SHOP_METAFIELD_NAMESPACE || n.namespace.startsWith("app--"))
-  ) ?? nodes.find((n) => n.key === SHOP_METAFIELD_KEY) ?? null;
-}
-function isBenignMetafieldDefinitionError(userErrors) {
-  if (!(userErrors == null ? void 0 : userErrors.length)) return false;
-  return userErrors.every(
-    (e) => /taken|already|exists|declarative|read.only|read-only|not permitted|access control|public_read_write/i.test(
-      `${e.message} ${e.code ?? ""}`
-    )
-  );
+  ) ?? null;
 }
 async function ensureMetafieldDefinition(admin) {
-  var _a2, _b;
-  const existing = await findShopEntregaMetafieldDefinition(admin);
-  if (existing && (existing.namespace === SHOP_METAFIELD_NAMESPACE || existing.namespace.startsWith("app--"))) {
+  const appDef = await findAppShopEntregaMetafieldDefinition(admin);
+  if (appDef) {
     return {
       ok: true,
-      message: "Definición del metacampo de tienda ya existía."
+      message: `Definición del metacampo de tienda lista (${appDef.namespace}).`
     };
   }
-  const created = await graphql(
-    admin,
-    `#graphql
-      mutation CreateShopMetafieldDefinition {
-        metafieldDefinitionCreate(
-          definition: {
-            name: "Entrega en tienda — configuración"
-            namespace: "${SHOP_METAFIELD_NAMESPACE}"
-            key: "${SHOP_METAFIELD_KEY}"
-            description: "Ciudades, códigos postales, dirección de tienda y precios."
-            type: "json"
-            ownerType: SHOP
-          }
-        ) {
-          createdDefinition { id namespace key }
-          userErrors { field message code }
-        }
-      }`
-  );
-  const after = await findShopEntregaMetafieldDefinition(admin);
-  if (after && (after.namespace === SHOP_METAFIELD_NAMESPACE || after.namespace.startsWith("app--"))) {
-    const payload2 = (_a2 = created.data) == null ? void 0 : _a2.metafieldDefinitionCreate;
-    return {
-      ok: true,
-      message: (payload2 == null ? void 0 : payload2.createdDefinition) ? "Definición del metacampo de tienda creada." : "Definición del metacampo de tienda ya existía."
-    };
-  }
-  const payload = (_b = created.data) == null ? void 0 : _b.metafieldDefinitionCreate;
-  if (isBenignMetafieldDefinitionError(payload == null ? void 0 : payload.userErrors)) {
-    return {
-      ok: true,
-      message: "Definición del metacampo gestionada por Shopify (despliegue de la app)."
-    };
-  }
-  const err = userErrorsMessage(payload == null ? void 0 : payload.userErrors) ?? graphqlErrorsMessage(created.errors);
   return {
-    ok: false,
-    message: err ?? "No se pudo crear la definición del metacampo de tienda."
+    ok: true,
+    message: "Definición $app pendiente de deploy. Ejecuta npm run deploy en la app; el valor de configuración se intentará guardar en el siguiente paso."
   };
 }
 function normalizeMatcherToken(s) {
@@ -583,6 +576,12 @@ async function ensureShopMetafieldValue(admin) {
   const payload = (_e = set.data) == null ? void 0 : _e.metafieldsSet;
   const err = userErrorsMessage(payload == null ? void 0 : payload.userErrors);
   if (err) {
+    if (/definition|access control|not permitted/i.test(err)) {
+      return {
+        ok: false,
+        message: "Falta la definición del metacampo $app. Ejecuta npm run deploy en la app y repite la configuración."
+      };
+    }
     return { ok: false, message: err };
   }
   if ((_f = payload == null ? void 0 : payload.metafields) == null ? void 0 : _f.length) {
