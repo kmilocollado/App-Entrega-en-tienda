@@ -14,6 +14,9 @@ const DISCOUNT_FUNCTION_CONFIG_JSON = JSON.stringify({
   freeOverSubtotal: 100,
 });
 
+/** Visible en Admin para confirmar que Render sirve el build correcto. */
+export const SETUP_BUILD_ID = "2026-03-09-v4";
+
 export const DEFAULT_ENTREGA_CONFIG = {
   enabled: true,
   matchMode: "any" as const,
@@ -561,57 +564,16 @@ async function ensureShippingDiscount(
   return { ok: false, message: "No se pudo crear el descuento de envío." };
 }
 
-async function findAppShopEntregaMetafieldDefinition(
-  admin: AdminApiContext,
-): Promise<{ id: string; namespace: string; key: string } | null> {
-  const result = await graphql<{
-    metafieldDefinitions: {
-      nodes: Array<{ id: string; namespace: string; key: string }>;
-    };
-  }>(
-    admin,
-    `#graphql
-      query ShopEntregaMetafieldDefinitions {
-        metafieldDefinitions(
-          first: 10
-          ownerType: SHOP
-          query: "key:${SHOP_METAFIELD_KEY}"
-        ) {
-          nodes { id namespace key }
-        }
-      }`,
-  );
-
-  const nodes = result.data?.metafieldDefinitions?.nodes ?? [];
-  return (
-    nodes.find(
-      (n) =>
-        n.key === SHOP_METAFIELD_KEY &&
-        (n.namespace === SHOP_METAFIELD_NAMESPACE ||
-          n.namespace.startsWith("app--")),
-    ) ?? null
-  );
-}
-
 /**
- * La definición $app se registra con `npm run deploy` (TOML declarativo).
- * Crearla por API provoca errores de access control en metacampos SHOP.
+ * No crea definiciones por API (Shopify rechaza access control en SHOP).
+ * La definición $app se registra con `npm run deploy` (shopify.app.toml).
  */
 async function ensureMetafieldDefinition(
-  admin: AdminApiContext,
+  _admin: AdminApiContext,
 ): Promise<SetupStepResult> {
-  const appDef = await findAppShopEntregaMetafieldDefinition(admin);
-  if (appDef) {
-    return {
-      ok: true,
-      message: `Definición del metacampo de tienda lista (${appDef.namespace}).`,
-    };
-  }
-
   return {
     ok: true,
-    message:
-      "Definición $app pendiente de deploy. Ejecuta npm run deploy en la app; el valor de configuración se intentará guardar en el siguiente paso.",
+    message: `Lista (${SETUP_BUILD_ID}). La definición $app se registra al desplegar la app en Partners (npm run deploy).`,
   };
 }
 

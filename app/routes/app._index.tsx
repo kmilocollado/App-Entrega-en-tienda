@@ -9,19 +9,22 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { allSetupOk, type SetupStatus } from "../lib/setup.shared";
+import { SETUP_BUILD_ID } from "../lib/setup.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const { runEntregaTiendaSetup } = await import("../lib/setup.server");
   const status = await runEntregaTiendaSetup(admin);
-  return { status };
+  return { status, buildId: SETUP_BUILD_ID };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
-  const { runEntregaTiendaSetup } = await import("../lib/setup.server");
+  const { runEntregaTiendaSetup, SETUP_BUILD_ID } = await import(
+    "../lib/setup.server"
+  );
   const status = await runEntregaTiendaSetup(admin);
-  return { status };
+  return { status, buildId: SETUP_BUILD_ID };
 };
 
 function StepRow({
@@ -44,11 +47,12 @@ function StepRow({
 }
 
 export default function Index() {
-  const { status } = useLoaderData<typeof loader>();
+  const { status, buildId } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
 
   const currentStatus = fetcher.data?.status ?? status;
+  const currentBuildId = fetcher.data?.buildId ?? buildId;
   const ready = allSetupOk(currentStatus);
   const isLoading =
     ["loading", "submitting"].includes(fetcher.state) &&
@@ -86,7 +90,7 @@ export default function Index() {
           </s-button>
           <s-text color="subdued">
             Al abrir esta página la configuración se ejecuta sola. Si algo falló,
-            pulsa el botón para repetirla.
+            pulsa el botón para repetirla. Versión servidor: {currentBuildId}
           </s-text>
         </s-stack>
       </s-section>

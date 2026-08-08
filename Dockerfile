@@ -1,4 +1,5 @@
 # Imagen multi-etapa: build (extensiones + web) → runtime mínimo.
+# setup-build: 2026-03-09-v4
 FROM node:20-alpine AS build
 RUN apk add --no-cache openssl
 
@@ -23,6 +24,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3000
+ENV SETUP_BUILD_ID=2026-03-09-v4
 
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
