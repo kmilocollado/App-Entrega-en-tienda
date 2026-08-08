@@ -28,8 +28,3 @@ scopes = "read_locations,read_orders,read_shipping,write_orders,read_delivery_cu
   "https://app-entrega-en-tienda.onrender.com/auth/shopify/callback",
   "https://app-entrega-en-tienda.onrender.com/api/auth/callback"
 ]
-
-[shop.metafields.app.entrega_tienda_config]
-name = "Entrega en tienda — configuración"
-description = "Ciudades, códigos postales, dirección de tienda y precios."
-type = "json"

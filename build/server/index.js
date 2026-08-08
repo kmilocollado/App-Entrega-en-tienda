@@ -29,7 +29,7 @@ const DISCOUNT_FUNCTION_CONFIG_JSON = JSON.stringify({
   freeShippingThresholdEnabled: true,
   freeOverSubtotal: 100
 });
-const SETUP_BUILD_ID = "2026-03-09-v4";
+const SETUP_BUILD_ID = "2026-03-09-v5";
 const DEFAULT_ENTREGA_CONFIG = {
   enabled: true,
   matchMode: "any",
@@ -434,6 +434,27 @@ async function ensureMetafieldDefinition(_admin) {
     message: `Lista (${SETUP_BUILD_ID}). La definición $app se registra al desplegar la app en Partners (npm run deploy).`
   };
 }
+async function tryCreateAppShopMetafieldDefinition(admin) {
+  await graphql(
+    admin,
+    `#graphql
+      mutation CreateShopMetafieldDefinition {
+        metafieldDefinitionCreate(
+          definition: {
+            name: "Entrega en tienda — configuración"
+            namespace: "${SHOP_METAFIELD_NAMESPACE}"
+            key: "${SHOP_METAFIELD_KEY}"
+            description: "Ciudades, códigos postales, dirección de tienda y precios."
+            type: "json"
+            ownerType: SHOP
+          }
+        ) {
+          createdDefinition { id }
+          userErrors { field message code }
+        }
+      }`
+  );
+}
 function normalizeMatcherToken(s) {
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
 }
@@ -526,6 +547,7 @@ async function ensureShopMetafieldValue(admin) {
   }
   const legacyRaw = (legacy == null ? void 0 : legacy.jsonValue) != null && typeof legacy.jsonValue === "object" && !Array.isArray(legacy.jsonValue) ? legacy.jsonValue : null;
   const initialValue = legacyRaw ? repairEntregaConfigJson(legacyRaw) ?? legacyRaw : DEFAULT_ENTREGA_CONFIG;
+  await tryCreateAppShopMetafieldDefinition(admin);
   const set = await graphql(
     admin,
     `#graphql

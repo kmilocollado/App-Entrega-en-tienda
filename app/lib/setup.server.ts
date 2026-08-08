@@ -15,7 +15,7 @@ const DISCOUNT_FUNCTION_CONFIG_JSON = JSON.stringify({
 });
 
 /** Visible en Admin para confirmar que Render sirve el build correcto. */
-export const SETUP_BUILD_ID = "2026-03-09-v4";
+export const SETUP_BUILD_ID = "2026-03-09-v5";
 
 export const DEFAULT_ENTREGA_CONFIG = {
   enabled: true,
@@ -577,6 +577,31 @@ async function ensureMetafieldDefinition(
   };
 }
 
+/** Intenta crear la definición $app sin bloque access (fallback si no hubo deploy). */
+async function tryCreateAppShopMetafieldDefinition(
+  admin: AdminApiContext,
+): Promise<void> {
+  await graphql(
+    admin,
+    `#graphql
+      mutation CreateShopMetafieldDefinition {
+        metafieldDefinitionCreate(
+          definition: {
+            name: "Entrega en tienda — configuración"
+            namespace: "${SHOP_METAFIELD_NAMESPACE}"
+            key: "${SHOP_METAFIELD_KEY}"
+            description: "Ciudades, códigos postales, dirección de tienda y precios."
+            type: "json"
+            ownerType: SHOP
+          }
+        ) {
+          createdDefinition { id }
+          userErrors { field message code }
+        }
+      }`,
+  );
+}
+
 function normalizeMatcherToken(s: string): string {
   return s
     .normalize("NFD")
@@ -710,6 +735,8 @@ async function ensureShopMetafieldValue(
   const initialValue = legacyRaw
     ? (repairEntregaConfigJson(legacyRaw) ?? legacyRaw)
     : DEFAULT_ENTREGA_CONFIG;
+
+  await tryCreateAppShopMetafieldDefinition(admin);
 
   const set = await graphql<{
     metafieldsSet: {
