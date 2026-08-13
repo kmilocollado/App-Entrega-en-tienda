@@ -120,8 +120,9 @@ export default function Index() {
         <s-unordered-list>
           <s-list-item>
             En <s-text type="strong">Configuración → Envío y entrega</s-text>,
-            crear la tarifa manual <s-text type="strong">Entrega en tienda</s-text>{" "}
-            con el precio deseado.
+            crear la tarifa manual{" "}
+            <s-text type="strong">Recogida en V&V Fuencarral</s-text> con el
+            precio deseado.
           </s-list-item>
           <s-list-item>
             En <s-text type="strong">Datos personalizados → Tienda</s-text>,
@@ -136,8 +137,8 @@ export default function Index() {
           </s-list-item>
           <s-list-item>
             Matcher del metacampo: solo{" "}
-            <s-text type="strong">Entrega en tienda</s-text>. No usar &quot;recogida&quot;
-            (conflicto con Sendcloud).
+            <s-text type="strong">Recogida en V&V Fuencarral</s-text>. No confundir
+            con Sendcloud (<s-text type="strong">Entrega en V&V Fuencarral</s-text>).
           </s-list-item>
           <s-list-item>
             En <s-text type="strong">Configuración → Checkout → Personalizar</s-text>,

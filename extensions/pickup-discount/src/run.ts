@@ -1,6 +1,6 @@
 import type { RunInput, FunctionRunResult } from "../generated/api";
 import { DeliveryMethod } from "../generated/api";
-import type { GeoMatchConfig, ZipRange } from "./geo_eligibility";
+import type { GeoMatchConfig } from "./geo_eligibility";
 import {
   inCountry,
   isEligibleForGeo,
@@ -8,6 +8,7 @@ import {
   resolveCustomerShippingAddress,
 } from "./geo_eligibility";
 import { matchesOriginalShippingRateTitle } from "./delivery_option_match";
+import { resolveEntregaTiendaConfig } from "./entrega_config";
 
 /** Si no hay precio válido ni en descuento ni en JSON tienda. */
 const DEFAULT_DISCOUNT_PRICE = 4.99;
@@ -19,38 +20,28 @@ type DiscountConfig = {
   freeShippingThresholdEnabled?: boolean;
 };
 
-type ShopConfig = {
-  enabled?: boolean;
-  displayName?: string;
-  pickupDeliveryOptionMatchers?: string[];
-  matchMode?: "any" | "all";
-  cities?: string[];
-  provinces?: string[];
-  zipRanges?: ZipRange[];
-  countryCode?: string;
-  storeAddress?: {
-    zip?: string;
-    city?: string;
-  };
-  pricing?: {
-    default?: number;
-    rules?: Array<
-      | { type: "subtotalAbove"; value: number; price: number }
-      | { type: "subtotalBelow"; value: number; price: number }
-    >;
-  };
-};
-
 const EMPTY: FunctionRunResult = { discounts: [] };
 
 export function run(input: RunInput): FunctionRunResult {
-  const shopCfg = input.shop?.metafield?.jsonValue as ShopConfig | undefined;
+  const shop = input.shop as
+    | {
+        appEntregaConfig?: { jsonValue?: unknown } | null;
+        legacyEntregaConfig?: { jsonValue?: unknown } | null;
+      }
+    | null
+    | undefined;
 
-  const matchers = shopCfg?.pickupDeliveryOptionMatchers ?? [];
-  if (matchers.length === 0) return EMPTY;
+  const shopCfg = resolveEntregaTiendaConfig(
+    shop?.appEntregaConfig?.jsonValue,
+    shop?.legacyEntregaConfig?.jsonValue,
+  );
+
+  if (!shopCfg || shopCfg.enabled === false) return EMPTY;
+
+  const matchers = shopCfg.pickupDeliveryOptionMatchers;
 
   if (shopCfg && shopHasGeoRules(shopCfg)) {
-    const geoCfg = shopCfg as ShopConfig & GeoMatchConfig;
+    const geoCfg = shopCfg as typeof shopCfg & GeoMatchConfig;
     const rawAddr = resolveCustomerShippingAddress(
       input.cart.deliveryGroups,
       input.cart.billingAddress ?? null,
@@ -74,8 +65,8 @@ export function run(input: RunInput): FunctionRunResult {
     }
   }
 
-  /** Falta `enabled` en JSON ⇒ se considera activo (solo `false` lo apaga todo). */
-  if (shopCfg?.enabled === false) return EMPTY;
+  /** Falta `enabled` en JSON ⇒ activo (solo `false` lo apaga). */
+  if (shopCfg.enabled === false) return EMPTY;
 
   const subtotal = parseMoneyDecimal(input.cart.cost.subtotalAmount.amount);
 
@@ -101,7 +92,7 @@ export function run(input: RunInput): FunctionRunResult {
       if (targetPrice >= base) return null;
       if (targetPrice <= 0) {
         return {
-          message: "Entrega en tienda gratuita",
+          message: "Recogida en V&V Fuencarral gratuita",
           targets: [{ deliveryOption: { handle: opt.handle } }],
           value: { percentage: { value: "100.0" } },
         };
@@ -114,7 +105,7 @@ export function run(input: RunInput): FunctionRunResult {
       const label = minorUnitsToDecimalString(targetMinor);
       const offAmount = minorUnitsToDecimalString(offMinor);
       return {
-        message: `Entrega en tienda — ${label}€`,
+        message: `Recogida en V&V Fuencarral — ${label}€`,
         targets: [{ deliveryOption: { handle: opt.handle } }],
         value: { fixedAmount: { amount: offAmount } },
       };
@@ -144,7 +135,7 @@ function resolvePricing(
       ? M | null | undefined
       : undefined
     : undefined,
-  shopCfg: ShopConfig | undefined,
+  shopCfg: ReturnType<typeof resolveEntregaTiendaConfig>,
 ): ResolvedPricing | null {
   const shopPricingDefault =
     shopCfg?.pricing?.default !== undefined &&
@@ -167,7 +158,7 @@ function resolvePricing(
   }
 
   /** Sin metacampo en el descuento: precio desde JSON tienda o default fijo. */
-  if (shopCfg && shopCfg.enabled !== false) {
+  if (shopCfg) {
     const freeRule = shopCfg.pricing?.rules?.find(
       (r) => r.type === "subtotalAbove" && r.price === 0 && r.value > 0,
     );
@@ -240,7 +231,9 @@ function computeTargetPrice(
   return defaultPx;
 }
 
-function shopHasGeoRules(cfg: ShopConfig): boolean {
+function shopHasGeoRules(
+  cfg: ReturnType<typeof resolveEntregaTiendaConfig>,
+): boolean {
   return Boolean(
     (cfg.cities?.length ?? 0) > 0 ||
       (cfg.provinces?.length ?? 0) > 0 ||

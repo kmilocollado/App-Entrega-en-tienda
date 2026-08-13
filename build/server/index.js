@@ -29,7 +29,8 @@ const DISCOUNT_FUNCTION_CONFIG_JSON = JSON.stringify({
   freeShippingThresholdEnabled: true,
   freeOverSubtotal: 100
 });
-const SETUP_BUILD_ID = "2026-03-09-v8";
+const SETUP_BUILD_ID = "2026-03-09-v15";
+const MANUAL_RATE_TITLE = "Recogida en V&V Fuencarral";
 const DEFAULT_ENTREGA_CONFIG = {
   enabled: true,
   matchMode: "any",
@@ -37,25 +38,25 @@ const DEFAULT_ENTREGA_CONFIG = {
   cities: ["Madrid"],
   provinces: ["M"],
   zipRanges: [{ from: "28000", to: "28099" }],
-  displayName: "Entrega en tienda",
-  pickupDeliveryOptionMatchers: ["entrega en tienda"],
+  displayName: MANUAL_RATE_TITLE,
+  hideOutsideGeo: true,
+  pickupDeliveryOptionMatchers: [MANUAL_RATE_TITLE],
   pricing: {
     default: 4.99,
     rules: [{ type: "subtotalAbove", value: 100, price: 0 }]
   },
   storeAddress: {
-    company: "Tienda VIDAL & VIDAL",
+    company: "Boutique VIDAL & VIDAL",
     first_name: "Tienda",
     last_name: "Recogida",
-    address1: "Plaza del Emperador Carlos V",
+    address1: "Calle Fuencarral 42",
     address2: "",
     city: "Madrid",
     province: "Madrid",
     province_code: "M",
-    zip: "28045",
+    zip: "28004",
     country: "Spain",
-    country_code: "ES",
-    phone: "+34900000000"
+    country_code: "ES"
   }
 };
 function userErrorsMessage(userErrors) {
@@ -554,23 +555,70 @@ function normalizeMatcherToken(s) {
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
 }
 function hasUnsafePickupMatchers(matchers) {
-  return matchers.some((m) => {
-    const n = normalizeMatcherToken(m);
-    if (!n) return true;
-    if (n === "recogida") return true;
-    if (n.includes("punto de servicio")) return true;
-    if (n.includes("sendcloud")) return true;
-    if (n.includes("recogida") && !n.includes("entrega en tienda")) return true;
-    return false;
-  });
+  const canonical = normalizeMatcherToken(MANUAL_RATE_TITLE);
+  return matchers.some((m) => normalizeMatcherToken(m) !== canonical);
+}
+function isUnsafeDisplayName(name) {
+  const n = normalizeMatcherToken(name);
+  if (n === normalizeMatcherToken(MANUAL_RATE_TITLE)) return false;
+  if (n.includes("punto de servicio") || n.includes("sendcloud") || n.startsWith("entrega en v&v")) {
+    return true;
+  }
+  return true;
+}
+function needsStoreAddressMigration(raw) {
+  const sa = raw.storeAddress ?? raw.store_address ?? raw.storeaddress;
+  if (sa == null || typeof sa !== "object" || Array.isArray(sa)) return true;
+  const zip = String(sa.zip ?? "").replace(/\D/g, "");
+  const address1 = String(sa.address1 ?? "").trim().toLowerCase();
+  if (zip !== "28004") return true;
+  if (!address1.includes("fuencarral")) return true;
+  return false;
+}
+function storeAddressHasPhone(raw) {
+  const sa = raw.storeAddress ?? raw.store_address ?? raw.storeaddress;
+  if (sa == null || typeof sa !== "object" || Array.isArray(sa)) return false;
+  const phone = sa.phone;
+  return typeof phone === "string" && phone.trim().length > 0;
+}
+function stripStoreAddressPhone(raw) {
+  const key = raw.storeAddress != null ? "storeAddress" : raw.store_address != null ? "store_address" : raw.storeaddress != null ? "storeaddress" : null;
+  if (!key) return raw;
+  const sa = raw[key];
+  if (sa == null || typeof sa !== "object" || Array.isArray(sa)) return raw;
+  const copy = { ...sa };
+  delete copy.phone;
+  return { ...raw, [key]: copy };
 }
 function repairEntregaConfigJson(raw) {
   const matchers = Array.isArray(raw.pickupDeliveryOptionMatchers) ? raw.pickupDeliveryOptionMatchers : [];
-  if (!hasUnsafePickupMatchers(matchers)) return null;
-  return {
-    ...raw,
-    pickupDeliveryOptionMatchers: [...DEFAULT_ENTREGA_CONFIG.pickupDeliveryOptionMatchers]
-  };
+  const displayName = typeof raw.displayName === "string" ? raw.displayName.trim() : "";
+  const needsMatcherRepair = hasUnsafePickupMatchers(matchers);
+  const needsDisplayNameRepair = isUnsafeDisplayName(displayName);
+  const needsPhoneStrip = storeAddressHasPhone(raw);
+  const needsStoreAddress = needsStoreAddressMigration(raw);
+  if (!needsMatcherRepair && !needsDisplayNameRepair && !needsPhoneStrip && !needsStoreAddress) {
+    return null;
+  }
+  let repaired = stripStoreAddressPhone({ ...raw });
+  if (needsMatcherRepair) {
+    repaired = {
+      ...repaired,
+      pickupDeliveryOptionMatchers: [
+        ...DEFAULT_ENTREGA_CONFIG.pickupDeliveryOptionMatchers
+      ]
+    };
+  }
+  if (needsDisplayNameRepair) {
+    repaired = { ...repaired, displayName: DEFAULT_ENTREGA_CONFIG.displayName };
+  }
+  if (needsStoreAddress) {
+    repaired = {
+      ...repaired,
+      storeAddress: { ...DEFAULT_ENTREGA_CONFIG.storeAddress }
+    };
+  }
+  return repaired;
 }
 async function ensureShopMetafieldValue(admin) {
   var _a2, _b, _c, _d;
@@ -617,7 +665,7 @@ async function ensureShopMetafieldValue(admin) {
       }
       return {
         ok: true,
-        message: "Matchers de envío corregidos (ya no afectan Sendcloud / pickup points)."
+        message: "Configuración actualizada (título Recogida en V&V Fuencarral, dirección Fuencarral 42)."
       };
     }
     return {
@@ -1233,10 +1281,10 @@ const app__index = UNSAFE_withComponentProps(function Index() {
           children: ["En ", /* @__PURE__ */ jsx("s-text", {
             type: "strong",
             children: "Configuración → Envío y entrega"
-          }), ", crear la tarifa manual ", /* @__PURE__ */ jsx("s-text", {
+          }), ", crear la tarifa manual", " ", /* @__PURE__ */ jsx("s-text", {
             type: "strong",
-            children: "Entrega en tienda"
-          }), " ", "con el precio deseado."]
+            children: "Recogida en V&V Fuencarral"
+          }), " con el precio deseado."]
         }), /* @__PURE__ */ jsxs("s-list-item", {
           children: ["En ", /* @__PURE__ */ jsx("s-text", {
             type: "strong",
@@ -1259,8 +1307,11 @@ const app__index = UNSAFE_withComponentProps(function Index() {
         }), /* @__PURE__ */ jsxs("s-list-item", {
           children: ["Matcher del metacampo: solo", " ", /* @__PURE__ */ jsx("s-text", {
             type: "strong",
-            children: "Entrega en tienda"
-          }), '. No usar "recogida" (conflicto con Sendcloud).']
+            children: "Recogida en V&V Fuencarral"
+          }), ". No confundir con Sendcloud (", /* @__PURE__ */ jsx("s-text", {
+            type: "strong",
+            children: "Entrega en V&V Fuencarral"
+          }), ")."]
         }), /* @__PURE__ */ jsxs("s-list-item", {
           children: ["En ", /* @__PURE__ */ jsx("s-text", {
             type: "strong",
@@ -1286,7 +1337,7 @@ const route9 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProper
   headers,
   loader
 }, Symbol.toStringTag, { value: "Module" }));
-const serverManifest = { "entry": { "module": "/assets/entry.client-BF-FzpIp.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js"], "css": [] }, "routes": { "root": { "id": "root", "parentId": void 0, "path": "", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": false, "module": "/assets/root-CC0ImHxS.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/webhooks.app.scopes_update": { "id": "routes/webhooks.app.scopes_update", "parentId": "root", "path": "webhooks/app/scopes_update", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": false, "hasErrorBoundary": false, "module": "/assets/webhooks.app.scopes_update-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/webhooks.app.uninstalled": { "id": "routes/webhooks.app.uninstalled", "parentId": "root", "path": "webhooks/app/uninstalled", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": false, "hasErrorBoundary": false, "module": "/assets/webhooks.app.uninstalled-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.setup-version": { "id": "routes/api.setup-version", "parentId": "root", "path": "api/setup-version", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": false, "hasErrorBoundary": false, "module": "/assets/api.setup-version-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/auth.login": { "id": "routes/auth.login", "parentId": "root", "path": "auth/login", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": false, "module": "/assets/route-DELoIbZP.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js", "/assets/AppProxyProvider-DmoHTPZF.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/_index": { "id": "routes/_index", "parentId": "root", "path": void 0, "index": true, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": false, "module": "/assets/route-BKVlaaEk.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js"], "css": ["/assets/route-Xpdx9QZl.css"], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/auth.$": { "id": "routes/auth.$", "parentId": "root", "path": "auth/*", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": false, "hasErrorBoundary": false, "module": "/assets/auth._-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/app": { "id": "routes/app", "parentId": "root", "path": "app", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": true, "module": "/assets/app-DbKNTe2N.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js", "/assets/AppProxyProvider-DmoHTPZF.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/app.delivery-customization.$functionId.$id": { "id": "routes/app.delivery-customization.$functionId.$id", "parentId": "routes/app", "path": "delivery-customization/:functionId/:id", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": false, "module": "/assets/app.delivery-customization._functionId._id-C_m-dg56.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/app._index": { "id": "routes/app._index", "parentId": "routes/app", "path": void 0, "index": true, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": false, "module": "/assets/app._index-rx6VGar_.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 } }, "url": "/assets/manifest-6100445a.js", "version": "6100445a", "sri": void 0 };
+const serverManifest = { "entry": { "module": "/assets/entry.client-BF-FzpIp.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js"], "css": [] }, "routes": { "root": { "id": "root", "parentId": void 0, "path": "", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": false, "module": "/assets/root-CC0ImHxS.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/webhooks.app.scopes_update": { "id": "routes/webhooks.app.scopes_update", "parentId": "root", "path": "webhooks/app/scopes_update", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": false, "hasErrorBoundary": false, "module": "/assets/webhooks.app.scopes_update-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/webhooks.app.uninstalled": { "id": "routes/webhooks.app.uninstalled", "parentId": "root", "path": "webhooks/app/uninstalled", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": false, "hasErrorBoundary": false, "module": "/assets/webhooks.app.uninstalled-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.setup-version": { "id": "routes/api.setup-version", "parentId": "root", "path": "api/setup-version", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": false, "hasErrorBoundary": false, "module": "/assets/api.setup-version-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/auth.login": { "id": "routes/auth.login", "parentId": "root", "path": "auth/login", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": false, "module": "/assets/route-DELoIbZP.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js", "/assets/AppProxyProvider-DmoHTPZF.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/_index": { "id": "routes/_index", "parentId": "root", "path": void 0, "index": true, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": false, "module": "/assets/route-BKVlaaEk.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js"], "css": ["/assets/route-Xpdx9QZl.css"], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/auth.$": { "id": "routes/auth.$", "parentId": "root", "path": "auth/*", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": false, "hasErrorBoundary": false, "module": "/assets/auth._-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/app": { "id": "routes/app", "parentId": "root", "path": "app", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": true, "module": "/assets/app-DbKNTe2N.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js", "/assets/AppProxyProvider-DmoHTPZF.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/app.delivery-customization.$functionId.$id": { "id": "routes/app.delivery-customization.$functionId.$id", "parentId": "routes/app", "path": "delivery-customization/:functionId/:id", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": false, "module": "/assets/app.delivery-customization._functionId._id-C_m-dg56.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/app._index": { "id": "routes/app._index", "parentId": "routes/app", "path": void 0, "index": true, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasDefaultExport": true, "hasErrorBoundary": false, "module": "/assets/app._index-C27XFBPL.js", "imports": ["/assets/chunk-4N6VE7H7-a2UNLnVa.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 } }, "url": "/assets/manifest-96f731e1.js", "version": "96f731e1", "sri": void 0 };
 const assetsBuildDirectory = "build/client";
 const basename = "/";
 const future = { "unstable_optimizeDeps": false, "v8_passThroughRequests": false, "unstable_trailingSlashAwareDataRequests": false, "unstable_previewServerPrerendering": false, "v8_middleware": false, "v8_splitRouteModules": false, "v8_viteEnvironmentApi": false };

@@ -24,7 +24,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3000
-ENV SETUP_BUILD_ID=2026-03-09-v8
+ENV SETUP_BUILD_ID=2026-03-09-v15
 
 COPY package.json package-lock.json ./
 COPY prisma ./prisma

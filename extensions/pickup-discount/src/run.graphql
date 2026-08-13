@@ -36,7 +36,10 @@ query RunInput {
     }
   }
   shop {
-    metafield(namespace: "$app", key: "entrega_tienda_config") {
+    appEntregaConfig: metafield(namespace: "$app", key: "entrega_tienda_config") {
+      jsonValue
+    }
+    legacyEntregaConfig: metafield(namespace: "custom", key: "entrega_tienda_config") {
       jsonValue
     }
   }

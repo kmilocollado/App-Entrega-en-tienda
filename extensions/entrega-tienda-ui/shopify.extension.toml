@@ -10,10 +10,18 @@ type = "ui_extension"
   target = "purchase.checkout.shipping-option-list.render-after"
   module = "./src/PickupNotice.tsx"
 
+  [[extensions.targeting]]
+  target = "purchase.checkout.shipping-option-item.details.render"
+  module = "./src/PickupOptionDetails.tsx"
+
   [extensions.capabilities]
   network_access = false
   block_progress = false
 
   [[extensions.metafields]]
   namespace = "$app"
+  key = "entrega_tienda_config"
+
+  [[extensions.metafields]]
+  namespace = "custom"
   key = "entrega_tienda_config"

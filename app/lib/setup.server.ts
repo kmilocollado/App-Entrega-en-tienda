@@ -15,7 +15,9 @@ const DISCOUNT_FUNCTION_CONFIG_JSON = JSON.stringify({
 });
 
 /** Visible en Admin para confirmar que Render sirve el build correcto. */
-export const SETUP_BUILD_ID = "2026-03-09-v8";
+export const SETUP_BUILD_ID = "2026-03-09-v15";
+
+const MANUAL_RATE_TITLE = "Recogida en V&V Fuencarral";
 
 export const DEFAULT_ENTREGA_CONFIG = {
   enabled: true,
@@ -24,25 +26,25 @@ export const DEFAULT_ENTREGA_CONFIG = {
   cities: ["Madrid"],
   provinces: ["M"],
   zipRanges: [{ from: "28000", to: "28099" }],
-  displayName: "Entrega en tienda",
-  pickupDeliveryOptionMatchers: ["entrega en tienda"],
+  displayName: MANUAL_RATE_TITLE,
+  hideOutsideGeo: true,
+  pickupDeliveryOptionMatchers: [MANUAL_RATE_TITLE],
   pricing: {
     default: 4.99,
     rules: [{ type: "subtotalAbove", value: 100, price: 0 }],
   },
   storeAddress: {
-    company: "Tienda VIDAL & VIDAL",
+    company: "Boutique VIDAL & VIDAL",
     first_name: "Tienda",
     last_name: "Recogida",
-    address1: "Plaza del Emperador Carlos V",
+    address1: "Calle Fuencarral 42",
     address2: "",
     city: "Madrid",
     province: "Madrid",
     province_code: "M",
-    zip: "28045",
+    zip: "28004",
     country: "Spain",
     country_code: "ES",
-    phone: "+34900000000",
   },
 };
 
@@ -753,15 +755,57 @@ function normalizeMatcherToken(s: string): string {
 }
 
 function hasUnsafePickupMatchers(matchers: string[]): boolean {
-  return matchers.some((m) => {
-    const n = normalizeMatcherToken(m);
-    if (!n) return true;
-    if (n === "recogida") return true;
-    if (n.includes("punto de servicio")) return true;
-    if (n.includes("sendcloud")) return true;
-    if (n.includes("recogida") && !n.includes("entrega en tienda")) return true;
-    return false;
-  });
+  const canonical = normalizeMatcherToken(MANUAL_RATE_TITLE);
+  return matchers.some((m) => normalizeMatcherToken(m) !== canonical);
+}
+
+function isUnsafeDisplayName(name: string): boolean {
+  const n = normalizeMatcherToken(name);
+  if (n === normalizeMatcherToken(MANUAL_RATE_TITLE)) return false;
+  if (
+    n.includes("punto de servicio") ||
+    n.includes("sendcloud") ||
+    n.startsWith("entrega en v&v")
+  ) {
+    return true;
+  }
+  return true;
+}
+
+function needsStoreAddressMigration(raw: Record<string, unknown>): boolean {
+  const sa = raw.storeAddress ?? raw.store_address ?? raw.storeaddress;
+  if (sa == null || typeof sa !== "object" || Array.isArray(sa)) return true;
+  const zip = String((sa as { zip?: unknown }).zip ?? "").replace(/\D/g, "");
+  const address1 = String((sa as { address1?: unknown }).address1 ?? "")
+    .trim()
+    .toLowerCase();
+  if (zip !== "28004") return true;
+  if (!address1.includes("fuencarral")) return true;
+  return false;
+}
+
+function storeAddressHasPhone(raw: Record<string, unknown>): boolean {
+  const sa = raw.storeAddress ?? raw.store_address ?? raw.storeaddress;
+  if (sa == null || typeof sa !== "object" || Array.isArray(sa)) return false;
+  const phone = (sa as { phone?: unknown }).phone;
+  return typeof phone === "string" && phone.trim().length > 0;
+}
+
+function stripStoreAddressPhone(raw: Record<string, unknown>): Record<string, unknown> {
+  const key =
+    raw.storeAddress != null
+      ? "storeAddress"
+      : raw.store_address != null
+        ? "store_address"
+        : raw.storeaddress != null
+          ? "storeaddress"
+          : null;
+  if (!key) return raw;
+  const sa = raw[key];
+  if (sa == null || typeof sa !== "object" || Array.isArray(sa)) return raw;
+  const copy = { ...(sa as Record<string, unknown>) };
+  delete copy.phone;
+  return { ...raw, [key]: copy };
 }
 
 function repairEntregaConfigJson(
@@ -770,12 +814,42 @@ function repairEntregaConfigJson(
   const matchers = Array.isArray(raw.pickupDeliveryOptionMatchers)
     ? (raw.pickupDeliveryOptionMatchers as string[])
     : [];
-  if (!hasUnsafePickupMatchers(matchers)) return null;
+  const displayName =
+    typeof raw.displayName === "string" ? raw.displayName.trim() : "";
+  const needsMatcherRepair = hasUnsafePickupMatchers(matchers);
+  const needsDisplayNameRepair = isUnsafeDisplayName(displayName);
+  const needsPhoneStrip = storeAddressHasPhone(raw);
+  const needsStoreAddress = needsStoreAddressMigration(raw);
 
-  return {
-    ...raw,
-    pickupDeliveryOptionMatchers: [...DEFAULT_ENTREGA_CONFIG.pickupDeliveryOptionMatchers],
-  };
+  if (
+    !needsMatcherRepair &&
+    !needsDisplayNameRepair &&
+    !needsPhoneStrip &&
+    !needsStoreAddress
+  ) {
+    return null;
+  }
+
+  let repaired = stripStoreAddressPhone({ ...raw });
+  if (needsMatcherRepair) {
+    repaired = {
+      ...repaired,
+      pickupDeliveryOptionMatchers: [
+        ...DEFAULT_ENTREGA_CONFIG.pickupDeliveryOptionMatchers,
+      ],
+    };
+  }
+  if (needsDisplayNameRepair) {
+    repaired = { ...repaired, displayName: DEFAULT_ENTREGA_CONFIG.displayName };
+  }
+  if (needsStoreAddress) {
+    repaired = {
+      ...repaired,
+      storeAddress: { ...DEFAULT_ENTREGA_CONFIG.storeAddress },
+    };
+  }
+
+  return repaired;
 }
 
 async function ensureShopMetafieldValue(
@@ -835,11 +909,11 @@ async function ensureShopMetafieldValue(
           message: `Matchers inseguros detectados pero no se pudo corregir: ${err}`,
         };
       }
-      return {
-        ok: true,
-        message:
-          "Matchers de envío corregidos (ya no afectan Sendcloud / pickup points).",
-      };
+        return {
+          ok: true,
+          message:
+            "Configuración actualizada (título Recogida en V&V Fuencarral, dirección Fuencarral 42).",
+        };
     }
     return {
       ok: true,

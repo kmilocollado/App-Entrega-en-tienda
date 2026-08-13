@@ -1,7 +1,15 @@
 import type { AppMetafieldEntry } from "@shopify/ui-extensions/checkout";
 import type { EntregaTiendaUIConfig, StoreAddress } from "./config";
+import {
+  isCarrierPickupOrSendcloudTitle,
+  isUnsafePickupMatcher,
+  MANUAL_RATE_CANONICAL_TITLE,
+  MANUAL_RATE_DISPLAY_NAME,
+  normalizeTitle,
+} from "./deliveryOptionMatch";
 
-const NS = "$app";
+const APP_NS = "$app";
+const LEGACY_NS = "custom";
 const KEY = "entrega_tienda_config";
 
 function firstNonEmptyString(values: unknown[]): string | undefined {
@@ -45,7 +53,6 @@ export function normalizeStoreAddressShape(
     o.province_code,
     o.provinceCode,
   ]);
-  const phone = firstNonEmptyString([o.phone]) ?? "";
 
   return {
     first_name: firstNonEmptyString([o.first_name, o.firstName]) ?? "Tienda",
@@ -61,7 +68,6 @@ export function normalizeStoreAddressShape(
     zip,
     country,
     country_code,
-    phone,
   };
 }
 
@@ -80,19 +86,85 @@ function parseJsonMaybeDouble(raw: unknown): unknown {
   }
 }
 
+function sanitizeEntregaUiConfig(
+  base: Partial<EntregaTiendaUIConfig> & Record<string, unknown>,
+  storeAddress: StoreAddress | undefined,
+): EntregaTiendaUIConfig {
+  let matchers = Array.isArray(base.pickupDeliveryOptionMatchers)
+    ? (base.pickupDeliveryOptionMatchers as string[]).filter(
+        (m) => typeof m === "string",
+      )
+    : [];
+  if (matchers.some((m) => isUnsafePickupMatcher(m))) {
+    matchers = [MANUAL_RATE_DISPLAY_NAME];
+  } else if (matchers.length === 0) {
+    matchers = [MANUAL_RATE_DISPLAY_NAME];
+  }
+
+  const rawDisplay =
+    typeof base.displayName === "string" ? base.displayName.trim() : "";
+  const displayName =
+    !rawDisplay ||
+    isCarrierPickupOrSendcloudTitle(rawDisplay) ||
+    normalizeTitle(rawDisplay) !== MANUAL_RATE_CANONICAL_TITLE
+      ? MANUAL_RATE_DISPLAY_NAME
+      : rawDisplay;
+
+  return {
+    ...base,
+    enabled: base.enabled !== false,
+    displayName,
+    pickupDeliveryOptionMatchers: matchers,
+    matchMode:
+      base.matchMode === "all" || base.matchMode === "any"
+        ? base.matchMode
+        : "any",
+    cities: Array.isArray(base.cities)
+      ? (base.cities as string[]).filter((c) => typeof c === "string")
+      : [],
+    provinces: Array.isArray(base.provinces)
+      ? (base.provinces as string[]).filter((p) => typeof p === "string")
+      : [],
+    zipRanges: Array.isArray(base.zipRanges)
+      ? (base.zipRanges as Array<{ from?: string; to?: string }>)
+          .filter(
+            (r) =>
+              r &&
+              typeof r.from === "string" &&
+              typeof r.to === "string",
+          )
+          .map((r) => ({ from: r.from!, to: r.to! }))
+      : [],
+    countryCode:
+      typeof base.countryCode === "string" && base.countryCode.trim()
+        ? base.countryCode.trim()
+        : "ES",
+    storeAddress:
+      storeAddress ?? (base.storeAddress as StoreAddress | undefined),
+  } as EntregaTiendaUIConfig;
+}
+
+function readMetafieldJson(entry: AppMetafieldEntry | undefined): unknown {
+  if (!entry?.metafield) return null;
+  const m = entry.metafield;
+  if (m.valueType === "json_string" || m.type === "json") {
+    return parseJsonMaybeDouble(m.value);
+  }
+  return parseJsonMaybeDouble(m.value);
+}
+
 /**
  * Lee `entrega_tienda_config` tal como lo expone Checkout (useAppMetafields).
- * No asume `meta[0]`: el orden del array no está garantizado.
+ * Prioriza `$app`; fallback `custom` (legacy).
  */
 export function parseEntregaConfigFromAppMetafields(
   meta: AppMetafieldEntry[] | undefined | null,
 ): EntregaTiendaUIConfig | null {
-  const entry = meta?.find(
-    (m) =>
-      m.metafield?.namespace === NS && m.metafield?.key === KEY,
-  );
-  const rawVal = entry?.metafield?.value;
-  const parsed = parseJsonMaybeDouble(rawVal);
+  const entries = meta?.filter((m) => m.metafield?.key === KEY) ?? [];
+  const appEntry = entries.find((m) => m.metafield?.namespace === APP_NS);
+  const legacyEntry = entries.find((m) => m.metafield?.namespace === LEGACY_NS);
+  const entry = appEntry ?? legacyEntry ?? entries[0];
+  const parsed = readMetafieldJson(entry);
   if (parsed == null || typeof parsed !== "object") return null;
 
   const base = parsed as Partial<EntregaTiendaUIConfig> &
@@ -102,17 +174,14 @@ export function parseEntregaConfigFromAppMetafields(
     base.store_address ??
     base.storeaddress;
   const storeAddress = normalizeStoreAddressShape(rawSa);
+  const resolvedStore =
+    storeAddress ?? (base.storeAddress as StoreAddress | undefined);
+  const storeWithoutPhone = resolvedStore
+    ? ({ ...resolvedStore, phone: undefined } as StoreAddress)
+    : undefined;
+  if (storeWithoutPhone && "phone" in storeWithoutPhone) {
+    delete (storeWithoutPhone as { phone?: string }).phone;
+  }
 
-  return {
-    ...base,
-    enabled: Boolean(base.enabled),
-    displayName: String(base.displayName ?? ""),
-    pickupDeliveryOptionMatchers: Array.isArray(
-      base.pickupDeliveryOptionMatchers,
-    )
-      ? (base.pickupDeliveryOptionMatchers as string[])
-      : [],
-    storeAddress:
-      storeAddress ?? (base.storeAddress as StoreAddress | undefined),
-  } as EntregaTiendaUIConfig;
+  return sanitizeEntregaUiConfig(base, storeWithoutPhone);
 }

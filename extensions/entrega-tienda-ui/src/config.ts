@@ -3,6 +3,12 @@ import {
   matchesRenamedDisplayTitle,
 } from "./deliveryOptionMatch";
 
+import {
+  inCountry,
+  isEligibleForGeo,
+  type GeoMatchConfig,
+} from "./geoEligibility";
+
 export type StoreAddress = {
   first_name: string;
   last_name: string;
@@ -14,7 +20,8 @@ export type StoreAddress = {
   province: string;
   zip: string;
   country: string;
-  phone: string;
+  /** No se usa en checkout; el teléfono del pedido es siempre el del cliente. */
+  phone?: string;
   /** Preferible: ISO (ej. `ES`). Si falta se intentará inferir desde `country`. */
   country_code?: string;
   /** Preferible: código que usa Shopify Checkout para la provincia (ej. España: `MD` para Madrid). */
@@ -26,6 +33,11 @@ export type EntregaTiendaUIConfig = {
   displayName: string;
   pickupDeliveryOptionMatchers: string[];
   storeAddress: StoreAddress;
+  matchMode?: "any" | "all";
+  cities?: string[];
+  provinces?: string[];
+  zipRanges?: Array<{ from: string; to: string }>;
+  countryCode?: string;
 };
 
 type CheckoutDeliveryOption = {
@@ -42,7 +54,7 @@ export function isManualShippingDeliveryOption(
 }
 
 /**
- * Tarifa manual "Entrega en tienda" (SHIPPING), no Sendcloud pickupPoint.
+ * Tarifa manual "Recogida en V&V Fuencarral" (SHIPPING), no Sendcloud pickupPoint.
  */
 export function matchesPickupDeliveryTitle(
   title: string | undefined | null,
@@ -70,4 +82,25 @@ export function normalize(s: string): string {
     .replace(/[\u0300-\u036f]/g, "")
     .trim()
     .toLowerCase();
+}
+
+/** Solo Madrid (u otra zona definida en el metacampo). */
+export function isCustomerEligibleForEntregaTienda(
+  addr:
+    | {
+        city?: string | null;
+        provinceCode?: string | null;
+        zip?: string | null;
+        countryCode?: string | null;
+      }
+    | null
+    | undefined,
+  cfg: GeoMatchConfig | null | undefined,
+): boolean {
+  if (!cfg) return false;
+  const hasSignal = Boolean(
+    addr?.city?.trim() || addr?.zip?.trim() || addr?.provinceCode?.trim(),
+  );
+  if (!hasSignal) return false;
+  return inCountry(addr ?? {}, cfg) && isEligibleForGeo(addr ?? {}, cfg);
 }

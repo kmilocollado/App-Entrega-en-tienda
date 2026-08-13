@@ -11,6 +11,7 @@ import type { ShippingAddress } from "@shopify/ui-extensions/checkout";
 import { useLayoutEffect } from "react";
 import {
   matchesPickupDeliveryTitle,
+  isCustomerEligibleForEntregaTienda,
   normalize,
   type StoreAddress,
 } from "./config";
@@ -160,6 +161,12 @@ function storeCountryCode(s: StoreAddress): string | undefined {
   return undefined;
 }
 
+function storeProvinceCode(s: StoreAddress): string | undefined {
+  const code =
+    typeof s.province_code === "string" ? s.province_code.trim() : "";
+  return code || undefined;
+}
+
 function storeAddressToCheckoutPatch(
   s: StoreAddress,
   buyer?: AddrLike,
@@ -168,9 +175,7 @@ function storeAddressToCheckoutPatch(
   const line1 = emptyToUndef(s.address1);
   if (!cc || !line1) return null;
 
-  const phone = emptyToUndef(s.phone) ?? emptyToUndef(buyer?.phone);
-
-  // No enviamos provinceCode: el checkout deja la provincia que el comprador ya tenía.
+  // No enviamos phone: el checkout conserva el del cliente (o lo que él introduzca).
   // No enviamos firstName/lastName/name: el pedido debe seguir identificando al cliente.
   return {
     company: emptyToUndef(s.company) ?? "Tienda VIDAL & VIDAL",
@@ -178,7 +183,7 @@ function storeAddressToCheckoutPatch(
     address2: emptyToUndef(s.address2) ?? "",
     city: emptyToUndef(s.city),
     zip: emptyToUndef(s.zip),
-    phone,
+    provinceCode: storeProvinceCode(s) ?? emptyToUndef(buyer?.provinceCode),
     countryCode: cc,
   };
 }
@@ -208,6 +213,8 @@ function checkoutAddressMatchesStore(
 const pickupSyncSession = {
   prevIsPickup: false,
   applyAttempts: 0,
+  bootstrapped: false,
+  lastSelectionSignature: "",
 };
 
 function savedOriginalToCheckoutPatch(o: OriginalShippingJson): ShippingPatch {
@@ -267,15 +274,30 @@ export function usePickupShippingAddressSync(): void {
   const canApplyShippingAddress =
     instructions?.delivery?.canSelectCustomAddress !== false;
 
-  const meta = useAppMetafields({
+  const metaApp = useAppMetafields({
     type: "shop",
     namespace: "$app",
     key: "entrega_tienda_config",
   });
-  const cfg = parseEntregaConfigFromAppMetafields(meta);
+  const metaLegacy = useAppMetafields({
+    type: "shop",
+    namespace: "custom",
+    key: "entrega_tienda_config",
+  });
+  const cfg = parseEntregaConfigFromAppMetafields([
+    ...(metaApp ?? []),
+    ...(metaLegacy ?? []),
+  ]);
+
+  const customerEligible = isCustomerEligibleForEntregaTienda(
+    shippingAddress,
+    cfg,
+  );
 
   const isPickup = Boolean(
-    cfg?.enabled &&
+    cfg &&
+      cfg.enabled !== false &&
+      customerEligible &&
       groups?.some((group) => {
         const selectedHandle = group.selectedDeliveryOption?.handle;
         if (!selectedHandle) return false;
@@ -294,14 +316,25 @@ export function usePickupShippingAddressSync(): void {
   useLayoutEffect(() => {
     const storeAddr = cfg?.storeAddress;
 
+    if (!pickupSyncSession.bootstrapped) {
+      pickupSyncSession.bootstrapped = true;
+      pickupSyncSession.lastSelectionSignature = selectionSignature;
+      pickupSyncSession.prevIsPickup = false;
+      return;
+    }
+
+    const selectionChanged =
+      selectionSignature !== pickupSyncSession.lastSelectionSignature;
+    pickupSyncSession.lastSelectionSignature = selectionSignature;
+
     async function sync() {
       const pickupNow = Boolean(
-        isPickup && storeAddr?.address1 && cfg?.enabled,
+        isPickup && storeAddr?.address1 && cfg && cfg.enabled !== false,
       );
       const prev = pickupSyncSession.prevIsPickup;
 
       if (pickupNow) {
-        if (!prev) {
+        if (selectionChanged) {
           if (pickupSyncSession.applyAttempts > 12) return;
 
           const savedRaw = await storage.read<unknown>(
@@ -375,6 +408,7 @@ export function usePickupShippingAddressSync(): void {
         } else if (
           pickupSyncSession.prevIsPickup &&
           storeAddr &&
+          selectionChanged &&
           !checkoutAddressMatchesStore(shippingAddress, storeAddr) &&
           pickupSyncSession.applyAttempts <= 18 &&
           canApplyShippingAddress &&
@@ -399,11 +433,12 @@ export function usePickupShippingAddressSync(): void {
           }
         }
 
+        pickupSyncSession.prevIsPickup = true;
         return;
       }
 
       if (!pickupNow) {
-        if (prev) {
+        if (prev && selectionChanged) {
           pickupSyncSession.applyAttempts = 0;
 
           const savedRaw = await storage.read<unknown>(

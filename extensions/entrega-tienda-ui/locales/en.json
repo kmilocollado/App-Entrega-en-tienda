@@ -1,8 +1,15 @@
 {
   "pickup": {
-    "title": "Store pickup",
-    "intro": "Pick up your order at:",
-    "subtext": "Your shipping address will switch to the store address. Billing address is not changed by this extension: use checkout’s “same as shipping” or an orderUpdate Flow. We will notify you by email and SMS when ready. Hours: M-F 10:00–20:00, Sat 10:00–14:00.",
+    "title": "Pickup at V&V Fuencarral",
+    "addressBold": "Pickup at VIDAL & VIDAL boutique, Calle Fuencarral 42, 28004 (Madrid).",
+    "availabilityLabel": "Availability:",
+    "availabilityText": "Shipping in 2–4 business days. You will receive a delivery confirmation email to pick up when you prefer.",
+    "hoursLabel": "Pickup hours:",
+    "hoursText": "Mon–Sat 10:00–21:00. Sun 12:00–20:00.",
+    "requirementsLabel": "Requirements:",
+    "requirementsText": "You must present your order confirmation email and ID.",
+    "thirdPartyLabel": "Third-party pickup:",
+    "thirdPartyText": "No problem. If someone else picks up, just contact us to authorize the handover.",
     "addressNotConfigured": "Store address is not configured in the metafield.",
     "cannotPatchShippingAddress": "In this checkout mode Shopify may block editing the shipping address (e.g. Apple/Google Pay or a checkout that locks the address). Try the normal web checkout (email + manual address)."
   }

@@ -1,8 +1,15 @@
 {
   "pickup": {
-    "title": "Recogida en tienda",
-    "intro": "Recogerás tu pedido en:",
-    "subtext": "La dirección de envío pasará a la de la tienda. La facturación no la modifica esta extensión: en el checkout puedes usar “misma que envío” o un Flow con orderUpdate. Te avisaremos por email y SMS cuando esté listo. Horario: L-V 10:00–20:00, S 10:00–14:00.",
+    "title": "Recogida en V&V Fuencarral",
+    "addressBold": "Recogida en boutique VIDAL & VIDAL, Calle Fuencarral 42, 28004 (Madrid).",
+    "availabilityLabel": "Disponibilidad:",
+    "availabilityText": "Envío de 2 a 4 días hábiles. Recibirás un email de confirmación entrega para recogerlo cuando prefieras.",
+    "hoursLabel": "Horario recogidas:",
+    "hoursText": "L-S de 10 h a 21 h. D de 12 h a 20 h.",
+    "requirementsLabel": "Requisitos:",
+    "requirementsText": "Es obligatorio presentar el correo de confirmación de pedido y DNI.",
+    "thirdPartyLabel": "Recogida por terceros:",
+    "thirdPartyText": "Sin problema. Si acude otra persona, solo escríbenos para autorizar la entrega.",
     "addressNotConfigured": "La dirección de la tienda no está configurada en el metafield.",
     "cannotPatchShippingAddress": "En este modo de checkout Shopify puede bloquear el cambio de dirección de envío (p. ej. Apple/Google Pay o tienda sin edición de dirección). Prueba el checkout web habitual o el correo + dirección manual."
   }

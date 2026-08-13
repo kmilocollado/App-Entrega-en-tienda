@@ -2,35 +2,32 @@ import {
   reactExtension,
   Banner,
   Text,
-  useDeliveryGroups,
   useAppMetafields,
   useShippingAddress,
   useTranslate,
   useInstructions,
+  useShippingOptionTarget,
 } from "@shopify/ui-extensions-react/checkout";
 import {
-  matchesPickupDeliveryTitle,
   isCustomerEligibleForEntregaTienda,
+  matchesPickupDeliveryTitle,
 } from "./config";
-import { usePickupShippingAddressSync } from "./usePickupShippingAddressSync";
 import { parseEntregaConfigFromAppMetafields } from "./shopMetafieldEntrega";
 import { PickupInfoBanner } from "./PickupInfoBanner";
 
 export default reactExtension(
-  "purchase.checkout.shipping-option-list.render-after",
-  () => <PickupNotice />,
+  "purchase.checkout.shipping-option-item.details.render",
+  () => <PickupOptionDetails />,
 );
 
-function PickupNotice() {
-  /** Crítico en checkout por pasos: la sección delivery-address suele desmontarse al llegar a envío. */
-  usePickupShippingAddressSync();
-
+function PickupOptionDetails() {
   const t = useTranslate();
-  const groups = useDeliveryGroups();
-  const shippingAddress = useShippingAddress();
   const instructions = useInstructions();
+  const shippingAddress = useShippingAddress();
+  const { shippingOptionTarget, isTargetSelected } = useShippingOptionTarget();
   const canPatchShippingAddress =
     instructions?.delivery?.canSelectCustomAddress !== false;
+
   const metaApp = useAppMetafields({
     type: "shop",
     namespace: "$app",
@@ -41,23 +38,20 @@ function PickupNotice() {
     namespace: "custom",
     key: "entrega_tienda_config",
   });
-
   const cfg = parseEntregaConfigFromAppMetafields([
     ...(metaApp ?? []),
     ...(metaLegacy ?? []),
   ]);
-  if (!cfg || cfg.enabled === false) return null;
-  if (!isCustomerEligibleForEntregaTienda(shippingAddress, cfg)) return null;
 
-  const isPickup = groups?.some((group) => {
-    const selectedHandle = group.selectedDeliveryOption?.handle;
-    if (!selectedHandle) return false;
-    const opt = group.deliveryOptions.find(
-      (o) => o.handle === selectedHandle,
-    );
-    return matchesPickupDeliveryTitle(opt?.title, cfg, opt);
-  });
-  if (!isPickup) return null;
+  if (!cfg || cfg.enabled === false) return null;
+
+  const opt = {
+    title: shippingOptionTarget.title,
+    type: shippingOptionTarget.type,
+  };
+
+  if (!matchesPickupDeliveryTitle(opt.title, cfg, opt)) return null;
+  if (!isCustomerEligibleForEntregaTienda(shippingAddress, cfg)) return null;
 
   const a = cfg.storeAddress;
   if (!a?.address1) {
@@ -67,6 +61,8 @@ function PickupNotice() {
       </Banner>
     );
   }
+
+  if (!isTargetSelected) return null;
 
   if (!canPatchShippingAddress) {
     return (
