@@ -5,7 +5,6 @@ import {
   useAppMetafields,
   useShippingAddress,
   useTranslate,
-  useInstructions,
   useShippingOptionTarget,
 } from "@shopify/ui-extensions-react/checkout";
 import {
@@ -22,11 +21,8 @@ export default reactExtension(
 
 function PickupOptionDetails() {
   const t = useTranslate();
-  const instructions = useInstructions();
   const shippingAddress = useShippingAddress();
   const { shippingOptionTarget, isTargetSelected } = useShippingOptionTarget();
-  const canPatchShippingAddress =
-    instructions?.delivery?.canSelectCustomAddress !== false;
 
   const metaApp = useAppMetafields({
     type: "shop",
@@ -63,14 +59,6 @@ function PickupOptionDetails() {
   }
 
   if (!isTargetSelected) return null;
-
-  if (!canPatchShippingAddress) {
-    return (
-      <Banner status="warning" title={t("pickup.title")}>
-        <Text>{t("pickup.cannotPatchShippingAddress")}</Text>
-      </Banner>
-    );
-  }
 
   return <PickupInfoBanner t={t} />;
 }

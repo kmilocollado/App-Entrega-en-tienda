@@ -10,7 +10,6 @@
     "requirementsText": "You must present your order confirmation email and ID.",
     "thirdPartyLabel": "Third-party pickup:",
     "thirdPartyText": "No problem. If someone else picks up, just contact us to authorize the handover.",
-    "addressNotConfigured": "Store address is not configured in the metafield.",
-    "cannotPatchShippingAddress": "In this checkout mode Shopify may block editing the shipping address (e.g. Apple/Google Pay or a checkout that locks the address). Try the normal web checkout (email + manual address)."
+    "addressNotConfigured": "Store address is not configured in the metafield."
   }
 }

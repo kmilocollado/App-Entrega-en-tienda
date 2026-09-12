@@ -19,6 +19,10 @@ api_version = "2026-07"
   uri = "https://app-entrega-en-tienda.onrender.com/webhooks/app/scopes_update"
   topics = ["app/scopes_update"]
 
+  [[webhooks.subscriptions]]
+  uri = "https://app-entrega-en-tienda.onrender.com/webhooks/orders/create"
+  topics = ["orders/create"]
+
 [access_scopes]
 scopes = "read_locations,read_orders,read_shipping,write_orders,read_delivery_customizations,write_delivery_customizations,write_discounts"
 
