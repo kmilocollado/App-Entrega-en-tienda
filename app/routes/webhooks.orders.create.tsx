@@ -121,40 +121,75 @@ async function readEntregaConfig(
   return raw as EntregaCfg;
 }
 
+const LOG_PREFIX = "[entrega-tienda] orders/create:";
+
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, admin, payload, topic } = await authenticate.webhook(request);
 
   console.log(`Received ${topic} webhook for ${shop}`);
 
-  if (!admin) return new Response();
+  if (!admin) {
+    console.error(`${LOG_PREFIX} sin admin context (¿sesión offline ausente?)`);
+    return new Response();
+  }
 
   const order = payload as OrderCreatePayload;
+  console.log(
+    `${LOG_PREFIX} payload keys=${Object.keys(order ?? {}).join(",")}`,
+  );
+
   const orderGid =
     order.admin_graphql_api_id ??
     (order.id ? `gid://shopify/Order/${order.id}` : null);
-  if (!orderGid) return new Response();
+  if (!orderGid) {
+    console.error(
+      `${LOG_PREFIX} sin id/admin_graphql_api_id en el payload, no se puede identificar el pedido`,
+    );
+    return new Response();
+  }
 
   const existingTags = (order.tags ?? "")
     .split(",")
     .map((t) => t.trim())
     .filter(Boolean);
-  if (existingTags.includes(REWRITTEN_TAG)) return new Response();
+  if (existingTags.includes(REWRITTEN_TAG)) {
+    console.log(`${LOG_PREFIX} ${orderGid} ya tiene el tag, se omite`);
+    return new Response();
+  }
 
   const shippingTitle = order.shipping_lines?.[0]?.title;
+  console.log(
+    `${LOG_PREFIX} ${orderGid} shipping_lines=${JSON.stringify(order.shipping_lines)} title="${shippingTitle}"`,
+  );
 
   const cfg = await readEntregaConfig(admin);
-  if (!cfg || cfg.enabled === false) return new Response();
-  if (!matchesPickupTitle(shippingTitle, cfg)) return new Response();
+  console.log(
+    `${LOG_PREFIX} ${orderGid} cfg enabled=${cfg?.enabled} displayName="${cfg?.displayName}" matchers=${JSON.stringify(cfg?.pickupDeliveryOptionMatchers)}`,
+  );
+  if (!cfg || cfg.enabled === false) {
+    console.log(`${LOG_PREFIX} ${orderGid} sin config o deshabilitada, se omite`);
+    return new Response();
+  }
+  if (!matchesPickupTitle(shippingTitle, cfg)) {
+    console.log(
+      `${LOG_PREFIX} ${orderGid} título "${shippingTitle}" no coincide con pickup, se omite`,
+    );
+    return new Response();
+  }
 
   const shippingAddress = cfg.storeAddress
     ? buildShippingAddressInput(cfg.storeAddress)
     : null;
   if (!shippingAddress) {
     console.error(
-      `[entrega-tienda] orders/create: storeAddress incompleto, no se pudo reescribir el pedido ${orderGid}`,
+      `${LOG_PREFIX} storeAddress incompleto (${JSON.stringify(cfg.storeAddress)}), no se pudo reescribir el pedido ${orderGid}`,
     );
     return new Response();
   }
+
+  console.log(
+    `${LOG_PREFIX} ${orderGid} coincide con pickup, aplicando shippingAddress=${JSON.stringify(shippingAddress)}`,
+  );
 
   const updateResponse = await admin.graphql(
     `#graphql
@@ -177,14 +212,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const userErrors = updateJson.data?.orderUpdate?.userErrors;
   if (userErrors?.length) {
     console.error(
-      `[entrega-tienda] orders/create: orderUpdate falló para ${orderGid}:`,
-      userErrors,
+      `${LOG_PREFIX} orderUpdate falló para ${orderGid}:`,
+      JSON.stringify(userErrors),
     );
     return new Response();
   }
   if (!updateJson.data?.orderUpdate?.order) {
+    console.error(
+      `${LOG_PREFIX} orderUpdate sin order en la respuesta para ${orderGid}:`,
+      JSON.stringify(updateJson),
+    );
     return new Response();
   }
+  console.log(`${LOG_PREFIX} ${orderGid} dirección reescrita correctamente`);
 
   const tagResponse = await admin.graphql(
     `#graphql
