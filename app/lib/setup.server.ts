@@ -15,7 +15,7 @@ const DISCOUNT_FUNCTION_CONFIG_JSON = JSON.stringify({
 });
 
 /** Visible en Admin para confirmar que Render sirve el build correcto. */
-export const SETUP_BUILD_ID = "2026-03-09-v15";
+export const SETUP_BUILD_ID = "2026-09-12-v16";
 
 const MANUAL_RATE_TITLE = "Recogida en V&V Fuencarral";
 
